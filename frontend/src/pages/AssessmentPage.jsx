@@ -1,7 +1,8 @@
-/** Present the assessment selector and the selected tower's health overview. */
+/** Present the assessment selector and the selected tower's overview or growth view. */
 import PropTypes from 'prop-types';
 import { useRef } from 'react';
 import { EvidencePanel } from '../components/EvidencePanel.jsx';
+import { GrowthPanel } from '../components/GrowthPanel.jsx';
 import { usePortfolio } from '../components/PortfolioProvider.jsx';
 import { sortHistory } from '../utils/health.js';
 
@@ -106,7 +107,7 @@ function AlertRow({ alert, finding, revision, send }) {
 AlertRow.propTypes = { alert: PropTypes.object.isRequired, finding: PropTypes.object.isRequired, revision: PropTypes.number.isRequired, send: PropTypes.func.isRequired };
 
 /** Show the frozen assessment or recover to the selector when a site no longer resolves. */
-export default function AssessmentPage({ siteId }) {
+export default function AssessmentPage({ siteId, tab = 'overview' }) {
   const { state, snapshot, assessments, alerts, send } = usePortfolio();
   const site = snapshot?.sitesById.get(siteId);
   const assessment = assessments.get(siteId);
@@ -119,7 +120,7 @@ export default function AssessmentPage({ siteId }) {
         ) : (
           <>
             {siteId && <p role="status" className="mt-3">Tower not found in the active scenario. Select another tower below.</p>}
-            <p className="mt-3 text-foreground-muted">Select a tower to review its health, evidence and findings.</p>
+            <p className="mt-3 text-foreground-muted">Select a tower to review its health, evidence and growth potential.</p>
             {snapshot.sitesById.size ? (
               <ul className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {[...snapshot.sitesById.values()].map(item => (
@@ -146,7 +147,12 @@ export default function AssessmentPage({ siteId }) {
         <a href="#/assessments" className={link}>All assessments</a>
         <h1 className={heading} tabIndex={-1}>{site.siteId} · {site.name}</h1>
         <p className="mt-2 text-sm text-foreground-muted">{snapshot.scenarioLabel} · {snapshot.referenceDate} (UTC) · {disclaimer}</p>
+        <nav aria-label="Assessment views" className="mt-4 flex flex-wrap gap-x-5 border-b border-border">
+          <a href={overviewHref(siteId)} className={link} aria-current={tab === 'overview' ? 'page' : undefined}>Overview</a>
+          <a href={`#/assessments/${encodeURIComponent(siteId)}/growth`} className={link} aria-current={tab === 'growth' ? 'page' : undefined}>Growth</a>
+        </nav>
       </header>
+      {tab === 'growth' ? <GrowthPanel readiness={assessment.readiness} commercial={assessment.commercial} /> : <>
       <section className={section} aria-labelledby="tower-health">
         <h2 id="tower-health" className="text-xl font-semibold">Tower health</h2>
         <p className="mt-3 text-2xl font-semibold tabular-nums">
@@ -215,8 +221,9 @@ export default function AssessmentPage({ siteId }) {
         </div>
       </section>
       <EvidencePanel evidence={evidence} />
+      </>}
     </div>
   );
 }
 
-AssessmentPage.propTypes = { siteId: PropTypes.string };
+AssessmentPage.propTypes = { siteId: PropTypes.string, tab: PropTypes.oneOf(['overview', 'growth']) };

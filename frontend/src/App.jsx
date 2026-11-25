@@ -55,7 +55,7 @@ function WorkshopRoutes() {
   }, []);
   useEffect(() => { main.current?.querySelector('h1')?.focus(); }, [hash]);
   const portfolio = hash === '' || hash === '#/portfolio';
-  const match = /^#\/assessments\/([A-Z0-9-]+)\/overview$/.exec(hash);
+  const match = /^#\/assessments\/([A-Z0-9-]+)\/(overview|growth)$/.exec(hash);
   const assessment = hash === '#/assessments' || Boolean(match);
   const navLink = 'inline-flex min-h-11 items-center px-2 text-sm font-medium hover:underline focus-visible:outline-ring aria-[current=page]:font-semibold aria-[current=page]:text-primary-700';
   return (
@@ -71,7 +71,7 @@ function WorkshopRoutes() {
         </div>
       </header>
       <main ref={main} className="mx-auto max-w-5xl px-5 py-8 sm:px-8 sm:py-12">
-        {portfolio ? <ScenarioWorkshop /> : assessment ? <AssessmentPage key={hash} siteId={match?.[1]} /> : (
+        {portfolio ? <ScenarioWorkshop /> : assessment ? <AssessmentPage key={hash} siteId={match?.[1]} tab={match?.[2]} /> : (
           <>
             <h1 tabIndex={-1} className="text-3xl font-semibold tracking-tight">Page not available</h1>
             <p className="mt-3 text-foreground-muted">This workshop route could not be found.</p>
