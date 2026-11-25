@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { PortfolioProvider, usePortfolio } from './components/PortfolioProvider.jsx';
 import { ScenarioControls } from './components/ScenarioControls.jsx';
+import ActionsPage from './pages/ActionsPage.jsx';
 import AssessmentPage from './pages/AssessmentPage.jsx';
 
 const dollars = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
@@ -57,6 +58,7 @@ function WorkshopRoutes() {
   const portfolio = hash === '' || hash === '#/portfolio';
   const match = /^#\/assessments\/([A-Z0-9-]+)\/(overview|growth)$/.exec(hash);
   const assessment = hash === '#/assessments' || Boolean(match);
+  const actions = hash === '#/actions' || hash === '#/actions/link';
   const navLink = 'inline-flex min-h-11 items-center px-2 text-sm font-medium hover:underline focus-visible:outline-ring aria-[current=page]:font-semibold aria-[current=page]:text-primary-700';
   return (
     <div className="min-h-screen bg-background font-sans text-foreground">
@@ -66,12 +68,13 @@ function WorkshopRoutes() {
           <nav aria-label="Workshop">
             <a href="#/portfolio" className={navLink} aria-current={portfolio ? 'page' : undefined}>Portfolio</a>
             <a href="#/assessments" className={navLink} aria-current={assessment ? 'page' : undefined}>Assessments</a>
+            <a href="#/actions" className={navLink} aria-current={actions ? 'page' : undefined}>Actions</a>
           </nav>
           <p className="py-1 text-xs font-medium uppercase tracking-wider text-foreground-muted">Synthetic workshop</p>
         </div>
       </header>
       <main ref={main} className="mx-auto max-w-5xl px-5 py-8 sm:px-8 sm:py-12">
-        {portfolio ? <ScenarioWorkshop /> : assessment ? <AssessmentPage key={hash} siteId={match?.[1]} tab={match?.[2]} /> : (
+        {portfolio ? <ScenarioWorkshop /> : assessment ? <AssessmentPage key={match?.[1]} siteId={match?.[1]} tab={match?.[2]} /> : actions ? <ActionsPage /> : (
           <>
             <h1 tabIndex={-1} className="text-3xl font-semibold tracking-tight">Page not available</h1>
             <p className="mt-3 text-foreground-muted">This workshop route could not be found.</p>

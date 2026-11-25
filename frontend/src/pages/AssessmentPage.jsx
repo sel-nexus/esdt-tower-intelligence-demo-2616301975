@@ -1,9 +1,11 @@
 /** Present the assessment selector and the selected tower's overview or growth view. */
 import PropTypes from 'prop-types';
-import { useRef } from 'react';
+import { useEffect, useRef } from 'react';
+import { AssessmentExport } from '../components/AssessmentExport.jsx';
 import { EvidencePanel } from '../components/EvidencePanel.jsx';
 import { GrowthPanel } from '../components/GrowthPanel.jsx';
 import { usePortfolio } from '../components/PortfolioProvider.jsx';
+import { nextOperationalAction } from '../utils/actions.js';
 import { sortHistory } from '../utils/health.js';
 
 const heading = 'text-3xl font-semibold tracking-tight sm:text-4xl';
@@ -108,9 +110,16 @@ AlertRow.propTypes = { alert: PropTypes.object.isRequired, finding: PropTypes.ob
 
 /** Show the frozen assessment or recover to the selector when a site no longer resolves. */
 export default function AssessmentPage({ siteId, tab = 'overview' }) {
-  const { state, snapshot, assessments, alerts, send } = usePortfolio();
+  const { state, snapshot, assessments, alerts, actions, send } = usePortfolio();
   const site = snapshot?.sitesById.get(siteId);
   const assessment = assessments.get(siteId);
+  const delivered = useRef(null);
+  const currentRef = assessment?.ref;
+  useEffect(() => {
+    if (!currentRef || delivered.current === currentRef) return;
+    delivered.current = currentRef;
+    send({ kind: 'assessmentDelivered', ref: currentRef });
+  }, [currentRef, send]);
   if (!snapshot || !assessment) {
     return (
       <>
@@ -141,6 +150,7 @@ export default function AssessmentPage({ siteId, tab = 'overview' }) {
 
   const { health, inspection, findings, evidence, disclaimer, ref } = assessment;
   const siteAlerts = alerts.filter(alert => alert.siteId === siteId);
+  const nextAction = nextOperationalAction(actions, siteId);
   return (
     <div className="space-y-6">
       <header>
@@ -158,7 +168,7 @@ export default function AssessmentPage({ siteId, tab = 'overview' }) {
         <p className="mt-3 text-2xl font-semibold tabular-nums">
           <span className={bandStyles[health.band]}>{health.band}</span>{health.score === null ? '' : ` · ${health.score}/100`}
         </p>
-        <p className="mt-2 text-sm">Next step: {findings[0]?.nextStep ?? 'No health follow-up identified in the current evidence.'}</p>
+        <p className="mt-2 text-sm">Next step: {nextAction?.nextStep ?? assessment.recommendation}</p>
         <p className="mt-2 text-sm">
           Latest inspection: {inspection.latestDate ?? 'Unknown'}
           {inspection.expiryDate && ` · ${inspection.expired ? 'Expired' : inspection.due ? 'Due soon' : 'Within validity window'} · Expiry: ${inspection.expiryDate}`}
@@ -201,7 +211,7 @@ export default function AssessmentPage({ siteId, tab = 'overview' }) {
       <section className={section} aria-labelledby="tower-alerts">
         <h2 id="tower-alerts" className="text-xl font-semibold">Alerts</h2>
         <p className="mt-2 text-sm text-foreground-muted">Simulated · No operational request. Alert progress does not change the health score.</p>
-        {state.result?.ok === false && ['ITEM_NOT_FOUND', 'INVALID_TRANSITION', 'STALE_VIEW'].includes(state.result.code) && (
+        {state.lastCommandKind === 'setAlert' && state.result?.ok === false && (
           <p role="alert" className="mt-3 text-sm text-error">Alert status was not updated. Review the current alert before retrying.</p>
         )}
         {siteAlerts.length ? (
@@ -222,6 +232,7 @@ export default function AssessmentPage({ siteId, tab = 'overview' }) {
       </section>
       <EvidencePanel evidence={evidence} />
       </>}
+      <AssessmentExport key={siteId} assessmentRef={ref} />
     </div>
   );
 }
