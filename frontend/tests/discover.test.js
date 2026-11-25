@@ -31,6 +31,7 @@ const view = (intent = {}, geometry) => selectDiscovery(snapshot, assessments, {
 
 afterEach(() => {
   cleanup();
+  window.localStorage.removeItem('esdt.demo.session.v1');
   window.history.replaceState(null, '', '/');
 });
 
@@ -141,6 +142,7 @@ describe('map and list sharing', () => {
 
 describe('discovery controls', () => {
   it('drills into Critical and gives marker and keyboard list the same destination', async () => {
+    window.localStorage.setItem('esdt.demo.session.v1', '{"v":1,"signedIn":true}');
     const user = userEvent.setup();
     render(createElement(App));
     await user.click(screen.getByRole('button', { name: 'Critical sites: 1' }));
@@ -156,6 +158,7 @@ describe('discovery controls', () => {
   });
 
   it('prompts for blank search, keeps unmatched input on the current route, and clears back to all towers', async () => {
+    window.localStorage.setItem('esdt.demo.session.v1', '{"v":1,"signedIn":true}');
     const user = userEvent.setup();
     render(createElement(App));
     const search = screen.getByRole('searchbox', { name: 'Search towers' });
@@ -176,7 +179,7 @@ describe('discovery controls', () => {
 
   it('keeps recovery and Help reachable without a valid fixture', () => {
     render(createElement(PortfolioProvider, { fixtureResult: { ok: false, code: 'INVALID_FIXTURE' } },
-      createElement(GlobalBar, { active: 'map', route: '#/map' }), createElement(TowerMapPage)));
+      createElement(GlobalBar, { active: 'map', route: '#/map', onSignOut: () => {} }), createElement(TowerMapPage)));
     expect(screen.getByRole('alert')).toHaveTextContent('No portfolio results were published');
     expect(screen.getByRole('link', { name: 'Help' })).toHaveAttribute('href', '#/help');
     expect(screen.getByRole('button', { name: 'Reset workshop' })).toBeEnabled();

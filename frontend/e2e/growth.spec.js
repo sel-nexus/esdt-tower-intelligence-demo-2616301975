@@ -6,6 +6,7 @@ test('follows assessment links to Growth, compares conditional fit and evidence 
   page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
   page.on('pageerror', error => errors.push(error.message));
 
+  await page.addInitScript(() => localStorage.setItem('esdt.demo.session.v1', '{"v":1,"signedIn":true}'));
   await page.goto('/');
   await page.getByRole('link', { name: 'Assessments', exact: true }).click();
   await page.getByRole('link', { name: /NYC-10234/ }).click();

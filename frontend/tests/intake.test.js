@@ -1,0 +1,209 @@
+// @vitest-environment jsdom
+/** Verify the local demo gate, exact text validation and isolated storage recovery. */
+import '@testing-library/jest-dom/vitest';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { createElement } from 'react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import App from '../src/App.jsx';
+import { CREDENTIALS_KEY, DEMO_CREDENTIALS, SESSION_KEY, resumeSession, signIn, signOut } from '../src/utils/session.js';
+import { MAX_SAMPLE_BYTES, SAMPLES_KEY, extractSample, listSamples, removeSample, saveSample } from '../src/utils/samples.js';
+
+const marker = '{"v":1,"signedIn":true}';
+const literal = '\ufeff<b>Synthetic practice only.</b>\r\n\t😀';
+
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+  localStorage.clear();
+  window.history.replaceState(null, '', '/');
+});
+
+/** Model the measured file bytes independently of reported metadata. */
+function txt(bytes, metadata = {}) {
+  const contents = typeof bytes === 'string' ? new TextEncoder().encode(bytes) : new Uint8Array(bytes);
+  return { name: 'Synthetic.TXT', type: '', size: contents.byteLength, lastModified: 0,
+    arrayBuffer: async () => contents.buffer, ...metadata };
+}
+
+/** Submit the public pair through the rendered gate. */
+function enterDemo() {
+  fireEvent.change(screen.getByLabelText('Username'), { target: { value: 'tower-demo' } });
+  fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'synthetic-only' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+}
+
+/** Open the sample route with an existing, documented session marker. */
+function openIntake() {
+  localStorage.setItem(SESSION_KEY, marker);
+  window.history.replaceState(null, '', '/#/samples');
+  return render(createElement(App));
+}
+
+/** Stage a file using the browser control's change event. */
+function stage(file) {
+  fireEvent.change(screen.getByLabelText('Choose Synthetic File'), { target: { files: [file] } });
+}
+
+const extractButton = () => screen.getByRole('button', { name: 'Extract and Save' });
+
+describe('local workshop session', () => {
+  it.each([['', ''], ['Tower-demo', 'synthetic-only'], ['tower-demo', 'synthetic-only ']])(
+    'does not persist a nonexact pair (%s)', (username, password) => {
+      expect(signIn(username, password, localStorage)).toEqual({ ok: false, code: 'DEMO_INPUT_INVALID' });
+      expect(localStorage.length).toBe(0);
+    },
+  );
+
+  it('repairs only fictitious credentials before marking entry and removes only the session on exit', () => {
+    localStorage.setItem(CREDENTIALS_KEY, '{"v":1,"username":"tampered","password":"tampered"}');
+    localStorage.setItem(SAMPLES_KEY, '{"v":1,"records":[]}');
+    expect(resumeSession(localStorage)).toEqual({ ok: true, signedIn: false });
+    expect(signIn('tower-demo', 'synthetic-only', localStorage)).toEqual({ ok: true, signedIn: true });
+    expect(localStorage.getItem(SESSION_KEY)).toBe(marker);
+    expect(resumeSession(localStorage).signedIn).toBe(true);
+    expect(signOut(localStorage)).toEqual({ ok: true, signedIn: false });
+    expect(localStorage.getItem(SESSION_KEY)).toBeNull();
+    expect(JSON.parse(localStorage.getItem(CREDENTIALS_KEY))).toEqual(DEMO_CREDENTIALS);
+    expect(localStorage.getItem(SAMPLES_KEY)).toBe('{"v":1,"records":[]}');
+  });
+
+  it.each(['{', '{"v":2,"signedIn":true}', '{"v":1,"signedIn":"true"}', '{"v":1,"signedIn":true,"token":0}'])(
+    'fails closed on invalid markers without overwriting them (%s)', raw => {
+      localStorage.setItem(SESSION_KEY, raw);
+      expect(resumeSession()).toEqual({ ok: false, signedIn: false, code: 'STORE_VERSION_INVALID' });
+      expect(localStorage.getItem(SESSION_KEY)).toBe(raw);
+    },
+  );
+
+  it('locks deep links, does not read samples on portfolio entry, and fails closed on a blocked marker write', () => {
+    window.history.replaceState(null, '', '/#/samples');
+    const reads = vi.spyOn(Storage.prototype, 'getItem');
+    render(createElement(App));
+    expect(screen.getByRole('heading', { name: /Sign in to Tower/ })).toHaveFocus();
+    expect(screen.queryByRole('navigation')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('Enter the exact demo username and password');
+    const original = Storage.prototype.setItem;
+    const failure = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (key, value) {
+      if (key === SESSION_KEY) throw new DOMException('Blocked', 'QuotaExceededError');
+      original.call(this, key, value);
+    });
+    enterDemo();
+    expect(screen.getByRole('alert')).toHaveTextContent('Browser storage is unavailable');
+    expect(localStorage.getItem(SESSION_KEY)).toBeNull();
+    expect(screen.getByLabelText('Password')).toHaveValue('');
+    failure.mockRestore();
+    enterDemo();
+    expect(screen.getByRole('heading', { name: 'Portfolio scenario' })).toHaveFocus();
+    expect(reads.mock.calls).not.toContainEqual([SAMPLES_KEY]);
+  });
+
+  it('warns on failed deletion, hides the workshop, and clears the marker on explicit retry', () => {
+    openIntake();
+    const removal = vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => { throw new Error('Blocked'); });
+    fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('Reloading may restore it');
+    expect(screen.queryByRole('navigation')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Sign in' })).not.toBeInTheDocument();
+    expect(localStorage.getItem(SESSION_KEY)).toBe(marker);
+    removal.mockRestore();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry Sign Out' }));
+    expect(screen.getByRole('heading', { name: /Sign in to Tower/ })).toHaveFocus();
+    expect(localStorage.getItem(SESSION_KEY)).toBeNull();
+  });
+});
+
+describe('isolated synthetic samples', () => {
+  it.each([
+    ['bad extension', txt('a', { name: 'synthetic.csv' }), 'SAMPLE_UNSUPPORTED'],
+    ['bad MIME', txt('a', { type: 'text/html' }), 'SAMPLE_UNSUPPORTED'],
+    ['oversize selection', txt('a', { size: MAX_SAMPLE_BYTES + 1 }), 'SAMPLE_TOO_LARGE'],
+    ['oversize measured bytes', txt(new Uint8Array(MAX_SAMPLE_BYTES + 1), { size: 1 }), 'SAMPLE_TOO_LARGE'],
+    ['wrong measured size', txt('abc', { size: 1 }), 'SAMPLE_EXTRACT_FAILED'],
+    ['invalid UTF-8', txt([0xc3, 0x28]), 'SAMPLE_EXTRACT_FAILED'],
+    ['NUL', txt([0]), 'SAMPLE_EXTRACT_FAILED'],
+    ['binary control', txt([0x1b]), 'SAMPLE_EXTRACT_FAILED'],
+    ['failed read', txt('a', { arrayBuffer: async () => { throw new Error('Unreadable'); } }), 'SAMPLE_EXTRACT_FAILED'],
+  ])('rejects %s before any write', async (_name, file, code) => {
+    expect(await extractSample(file)).toEqual({ ok: false, code });
+    expect(localStorage.getItem(SAMPLES_KEY)).toBeNull();
+  });
+
+  it('accepts empty and exactly 64 KiB TXT and preserves Unicode, whitespace and BOM across reads', async () => {
+    expect(await extractSample(txt(''))).toMatchObject({ ok: true, sample: { size: 0, text: '' } });
+    expect(await extractSample(txt('a'.repeat(MAX_SAMPLE_BYTES), { type: 'text/plain' }))).toMatchObject({ ok: true, sample: { size: MAX_SAMPLE_BYTES } });
+    const { sample } = await extractSample(txt(literal));
+    const saved = saveSample([], sample);
+    expect(saved.ok).toBe(true);
+    expect(listSamples()).toEqual(saved);
+    expect(saved.samples[0].text).toBe(literal);
+    expect(removeSample(saved.samples, 'absent').removed).toBe(false);
+    expect(removeSample(saved.samples, saved.samples[0].id)).toEqual({ ok: true, removed: true, samples: [] });
+  });
+
+  it('never evicts older samples at the cap or overwrites unreadable envelopes on entry', async () => {
+    const { sample } = await extractSample(txt('Synthetic'));
+    for (let index = 0; index < 10; index += 1) {
+      expect(saveSample(listSamples().samples, sample).ok).toBe(true);
+    }
+    const full = localStorage.getItem(SAMPLES_KEY);
+    expect(saveSample(listSamples().samples, sample)).toEqual({ ok: false, code: 'SAMPLE_LIMIT' });
+    expect(localStorage.getItem(SAMPLES_KEY)).toBe(full);
+    const unsupported = full.replace('"v":1', '"v":2');
+    localStorage.setItem(SAMPLES_KEY, unsupported);
+    openIntake();
+    expect(screen.getByRole('alert')).toHaveTextContent('unreadable or from an unsupported version');
+    expect(screen.queryByText('No retained samples yet.')).not.toBeInTheDocument();
+    expect(localStorage.getItem(SAMPLES_KEY)).toBe(unsupported);
+    localStorage.setItem(SAMPLES_KEY, full);
+    fireEvent.click(screen.getByRole('button', { name: 'Retry Loading Samples' }));
+    expect(screen.getAllByRole('button', { name: /Remove sample/ })).toHaveLength(10);
+    expect(localStorage.getItem(SAMPLES_KEY)).toBe(full);
+  });
+
+  it('keeps the last successful sample and bytes when save or removal runs out of quota', async () => {
+    const view = openIntake();
+    stage(txt(literal));
+    expect(localStorage.getItem(SAMPLES_KEY)).toBeNull();
+    fireEvent.click(extractButton());
+    expect(await screen.findByText('Synthetic sample saved on this browser.')).toBeVisible();
+    const before = localStorage.getItem(SAMPLES_KEY);
+    const original = Storage.prototype.setItem;
+    const quota = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (key, value) {
+      if (key === SAMPLES_KEY) throw new DOMException('Storage full', 'QuotaExceededError');
+      original.call(this, key, value);
+    });
+    stage(txt('Another sample', { name: 'another.txt' }));
+    fireEvent.click(extractButton());
+    expect(await screen.findByRole('alert')).toHaveTextContent('Previously retained samples are unchanged.');
+    expect(screen.queryByText('Another sample')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Remove sample/ }));
+    expect(screen.getByRole('alert')).toHaveTextContent('Previously retained samples are unchanged.');
+    expect(localStorage.getItem(SAMPLES_KEY)).toBe(before);
+    expect(view.container.querySelector('pre').textContent).toBe(literal);
+    expect(view.container.querySelector('pre b')).toBeNull();
+    quota.mockRestore();
+    view.unmount();
+    expect(openIntake().container.querySelector('pre').textContent).toBe(literal);
+  });
+
+  it.each(['cancel', 'new selection', 'sign out', 'other tab'])(
+    'discards a late file read after %s', async intent => {
+      openIntake();
+      let finish;
+      stage(txt('abc', { arrayBuffer: () => new Promise(resolve => { finish = resolve; }) }));
+      fireEvent.click(extractButton());
+      expect(extractButton()).toBeDisabled();
+      if (intent === 'cancel') fireEvent.click(screen.getByRole('button', { name: 'Cancel selection' }));
+      if (intent === 'new selection') stage(txt('replacement'));
+      if (intent === 'sign out') fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+      if (intent === 'other tab') {
+        localStorage.removeItem(SESSION_KEY);
+        act(() => window.dispatchEvent(new StorageEvent('storage', { key: SESSION_KEY, oldValue: marker, storageArea: localStorage })));
+        expect(screen.queryByRole('navigation')).not.toBeInTheDocument();
+      }
+      await act(async () => finish(new TextEncoder().encode('abc').buffer));
+      expect(localStorage.getItem(SAMPLES_KEY)).toBeNull();
+    },
+  );
+});

@@ -31,6 +31,7 @@ function withEvidence(id, changes) {
 
 afterEach(() => {
   cleanup();
+  window.localStorage.removeItem('esdt.demo.session.v1');
   window.history.replaceState(null, '', '/');
 });
 
@@ -178,6 +179,7 @@ describe('economics and committed projection', () => {
   });
 
   it('renders the answer, validation, raw cents and Unknown on a growth deep link', () => {
+    window.localStorage.setItem('esdt.demo.session.v1', '{"v":1,"signedIn":true}');
     window.history.replaceState(null, '', `/#/assessments/${nyc.siteId}/growth`);
     const { unmount } = render(createElement(App));
     const fit = screen.getByRole('region', { name: 'Colocation readiness' });

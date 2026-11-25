@@ -15,7 +15,7 @@ const fixture = loadBaseline();
 const nyc = 'NYC-10234';
 const path = 'power.headroomKw';
 const day = 86_400_000;
-afterEach(cleanup);
+afterEach(() => { cleanup(); window.localStorage.removeItem('esdt.demo.session.v1'); });
 
 /** Issue consecutive tab-local control intents for reducer tests. */
 const control = (state, args) => reduce(state, { ...args, commandId: state.lastCommandId + 1 });
@@ -157,6 +157,7 @@ describe('scenario transactions', () => {
 
 describe('facilitator controls', () => {
   it('stages draft edits, announces invalid input, and resets the effective tolerance', async () => {
+    window.localStorage.setItem('esdt.demo.session.v1', '{"v":1,"signedIn":true}');
     const user = userEvent.setup();
     render(createElement(App));
     const tolerance = screen.getByRole('spinbutton', { name: /proposed power tolerance/i });

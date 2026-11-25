@@ -6,6 +6,7 @@ test('opens health overviews and keeps the score and findings after closing a si
   page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
   page.on('pageerror', error => errors.push(error.message));
 
+  await page.addInitScript(() => localStorage.setItem('esdt.demo.session.v1', '{"v":1,"signedIn":true}'));
   await page.goto('/');
   await page.getByRole('link', { name: 'Assessments', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Assessments', exact: true })).toBeFocused();

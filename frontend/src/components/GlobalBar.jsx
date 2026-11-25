@@ -6,7 +6,7 @@ import { usePortfolio } from './PortfolioProvider.jsx';
 
 export const focus = 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring';
 const control = `min-h-11 rounded-md border border-border bg-surface px-3 text-sm ${focus}`;
-const navItems = [['portfolio', 'Portfolio'], ['map', 'Tower Map'], ['assessments', 'Assessments'], ['actions', 'Actions'], ['help', 'Help']];
+const navItems = [['portfolio', 'Portfolio'], ['map', 'Tower Map'], ['assessments', 'Assessments'], ['actions', 'Actions'], ['help', 'Help'], ['samples', 'Samples']];
 
 /** Open the same assessment route from search, shortlists, markers and rows. */
 export function TowerLink({ siteId, children, label, className, onFocus, onBlur, onPointerEnter, onPointerLeave }) {
@@ -31,8 +31,14 @@ TowerLink.propTypes = {
   onPointerEnter: PropTypes.func, onPointerLeave: PropTypes.func,
 };
 
-/** Keep search matched to the shared query without navigating until activation. */
-export function GlobalBar({ active, route }) {
+/**
+ * Show workshop navigation and shared search without navigating until activation.
+ * Args:
+ *   active: Current navigation destination, if registered.
+ *   route: Current hash used to collapse search between views.
+ *   onSignOut: Close the local workshop gate.
+ */
+export function GlobalBar({ active, route, onSignOut }) {
   const { snapshot, state, discovery, send } = usePortfolio();
   const id = useId();
   const searchInput = useRef(null);
@@ -78,6 +84,7 @@ export function GlobalBar({ active, route }) {
               </>
             )}
             <button type="button" onClick={reset} className={`${control} hover:bg-surface-raised`}>Reset workshop</button>
+            <button type="button" onClick={onSignOut} className={`${control} hover:bg-surface-raised`}>Sign out</button>
           </div>
         </div>
         <div className="flex flex-wrap items-center justify-between gap-x-6 pb-3 sm:pb-0">
@@ -138,4 +145,4 @@ export function GlobalBar({ active, route }) {
   );
 }
 
-GlobalBar.propTypes = { active: PropTypes.string, route: PropTypes.string.isRequired };
+GlobalBar.propTypes = { active: PropTypes.string, route: PropTypes.string.isRequired, onSignOut: PropTypes.func.isRequired };

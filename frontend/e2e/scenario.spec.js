@@ -6,6 +6,7 @@ test('switches, masks, applies settings and recovers the synthetic baseline', as
   page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
   page.on('pageerror', error => errors.push(error.message));
 
+  await page.addInitScript(() => localStorage.setItem('esdt.demo.session.v1', '{"v":1,"signedIn":true}'));
   await page.goto('/');
   const summary = page.getByRole('region', { name: 'Active scenario summary' });
   const controls = page.getByRole('region', { name: 'Facilitator controls' });

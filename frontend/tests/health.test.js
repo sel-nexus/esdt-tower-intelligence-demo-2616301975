@@ -25,6 +25,7 @@ const send = (state, command) => reduce(state, { ...command, commandId: state.la
 
 afterEach(() => {
   cleanup();
+  window.localStorage.removeItem('esdt.demo.session.v1');
   window.history.replaceState(null, '', '/');
 });
 
@@ -167,6 +168,7 @@ describe('alert progress', () => {
 
 describe('assessment navigation', () => {
   it('opens a linked assessment with heading focus, then acknowledges and closes without changing health', async () => {
+    window.localStorage.setItem('esdt.demo.session.v1', '{"v":1,"signedIn":true}');
     const user = userEvent.setup();
     render(createElement(App));
     await user.click(screen.getByRole('link', { name: 'Assessments' }));
@@ -194,6 +196,7 @@ describe('assessment navigation', () => {
   });
 
   it('recovers from an unknown site without displaying an invalid assessment', async () => {
+    window.localStorage.setItem('esdt.demo.session.v1', '{"v":1,"signedIn":true}');
     window.history.replaceState(null, '', '/#/assessments/MISSING/overview');
     const user = userEvent.setup();
     render(createElement(App));
