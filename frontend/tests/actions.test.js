@@ -34,7 +34,19 @@ const send = (state, command) => reduce(state, { commandId: state.lastCommandId 
 const ids = rows => rows.map(row => row.actionId);
 
 describe('action queues', () => {
-  it('projects all five queues from the same baseline, including safety, due work, cost and both upgrade types', () => {
+  it('projects dedicated missing-information and power queues in existing operational order', () => {
+    const actions = rankActions(baseline.snapshot, baseline.assessments);
+    const missing = selectQueue(actions, 'Missing Information');
+    expect(ids(missing)).toContain('LAX-60214:missing-info');
+    expect(missing).toEqual(actions.filter(row => row.kind === 'missing-info'));
+    const power = selectQueue(actions, 'Power Upgrades');
+    expect(ids(power)).toContain(actionId);
+    expect(ids(power)).not.toContain('ATL-30492:cabinet-upgrade');
+    expect(power).toEqual(actions.filter(row => row.kind === 'power-upgrade'));
+    expect(selectQueue([], 'Power Upgrades')).toEqual([]);
+  });
+
+  it('projects the five original queues from the same baseline, including safety, due work, cost and both upgrade types', () => {
     const actions = rankActions(baseline.snapshot, baseline.assessments, baseline.workflow);
     const [critical, inspection, cost, growth, upgrades] = QUEUES.map(queue => selectQueue(actions, queue));
     expect(ids(critical)).toContain(`${chi}:remediation`);

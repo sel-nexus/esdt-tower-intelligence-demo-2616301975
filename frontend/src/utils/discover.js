@@ -143,7 +143,8 @@ export function selectKpis(snapshot, index, alerts, activeIds = selectPortfolioS
 
 /** Use the queue orders, deduplicating eligible sites before taking at most five. */
 export function selectShortlists(snapshot, index, actions, active = selectPortfolioScope(snapshot, index)) {
-  return QUEUES.map(view => {
+  // Focused operational queues live in Actions without duplicating the portfolio shortlists.
+  return QUEUES.filter(view => view !== 'Missing Information' && view !== 'Power Upgrades').map(view => {
     const isGrowth = view === 'Growth Opportunities' || view === 'Upgrade Required';
     const rows = selectQueue(actions, view).filter(action => active.has(action.siteId)
       && (view !== 'Critical Sites' || action === nextOperationalAction(actions, action.siteId)));

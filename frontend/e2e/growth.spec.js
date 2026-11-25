@@ -20,7 +20,7 @@ test('follows assessment links to Growth, compares conditional fit and evidence 
   await expect(fit).toContainText('Power shortfall: 4 kW');
   await expect(fit).toContainText('Complete the power upgrade before adding a tenant, then validate fit.');
   await expect(fit).toContainText('Certified structural and site validation');
-  await expect(page.getByText(/Indicative assessment only/)).toBeVisible();
+  await expect(fit.getByText('Indicative assessment only', { exact: true })).toBeVisible();
   await fit.getByText('Deciding rule and score breakdown', { exact: true }).click();
   await expect(fit.getByText('UPGRADE_FIT', { exact: true })).toBeVisible();
   for (const [label, value] of [
@@ -33,6 +33,15 @@ test('follows assessment links to Growth, compares conditional fit and evidence 
   await expect(economics).toContainText('0.29 years');
   await economics.getByText('Raw illustrative amounts (USD cents)', { exact: true }).click();
   await expect(economics.getByText('1024100', { exact: true })).toBeVisible();
+  await expect(economics.getByText('Tower Owner data', { exact: true })).toBeVisible();
+  await page.getByText('Evidence and sources', { exact: true }).click();
+  const technical = page.locator('section').filter({ has: page.getByRole('heading', { name: 'ESDT-Aligned', exact: true }) });
+  const owner = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Tower Owner', exact: true }) });
+  const futureFit = technical.getByRole('listitem').filter({ hasText: 'Power upgrade future fit' });
+  await expect(futureFit).toContainText('Synthetic Future Fit Worksheet');
+  await expect(futureFit).toContainText('Observed: 2025-02-12 · Updated: 2025-02-20');
+  await expect(futureFit).toContainText('Confidence: 92%');
+  await expect(owner.getByRole('listitem').filter({ hasText: 'commercial.annualUpside' })).toContainText('Synthetic Lease and Cost Ledger');
 
   await page.getByRole('link', { name: 'Overview', exact: true }).click();
   await expect(page.getByRole('region', { name: 'Tower health' })).toContainText('Good · 86/100');
@@ -40,7 +49,9 @@ test('follows assessment links to Growth, compares conditional fit and evidence 
   await page.getByRole('link', { name: /LAX-60214/ }).click();
   await page.getByRole('link', { name: 'Growth', exact: true }).click();
   await expect(fit.getByRole('status')).toHaveText('Need More Information');
-  await expect(fit).toContainText('Structure status: Stale');
+  await expect(fit).toContainText('Structure status: Stale (required for fit)');
+  await expect(fit.getByText('Renew the expired inspection', { exact: true })).toBeVisible();
+  await expect(page.getByText(/required inputs need review/)).toBeVisible();
   await expect(fit).toContainText('Technical readiness score: Unknown');
   await expect(economics).toContainText('Unknown');
   expect(errors).toEqual([]);

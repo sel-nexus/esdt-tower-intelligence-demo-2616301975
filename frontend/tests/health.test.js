@@ -195,6 +195,30 @@ describe('assessment navigation', () => {
     expect(await screen.findByRole('heading', { name: 'Portfolio scenario' })).toBeVisible();
   });
 
+  it('shows limits on the LAX health assessment and separates inspection provenance from owner economics', async () => {
+    window.localStorage.setItem('esdt.demo.session.v1', '{"v":1,"signedIn":true}');
+    window.history.replaceState(null, '', `/#/assessments/${lax}/overview`);
+    const user = userEvent.setup();
+    render(createElement(App));
+    const health = within(screen.getByRole('region', { name: 'Tower health' }));
+    expect(health.getByText('Indicative assessment only')).toBeVisible();
+    expect(health.getByText(/Required health evidence needs review/)).toBeVisible();
+    expect(health.getByText('Workshop recommendation only. No work order is issued.')).toBeVisible();
+    const commercial = within(screen.getByRole('region', { name: 'Commercial snapshot' }));
+    expect(commercial.getByText('Tower Owner data')).toBeVisible();
+    expect(commercial.getByText(/not an approved business case/)).toBeVisible();
+    await user.click(screen.getByText('Evidence and sources'));
+    const technical = within(screen.getByRole('heading', { name: 'ESDT-Aligned' }).closest('section'));
+    const inspection = within(technical.getByText('histories.inspection').closest('li'));
+    expect(inspection.getByText('Synthetic Inspection Register · Synthetic')).toBeVisible();
+    expect(inspection.getByText('Observed: 2023-12-15 · Updated: 2025-02-20')).toBeVisible();
+    expect(inspection.getByText('Completeness: partial · Confidence: 55%')).toBeVisible();
+    expect(inspection.getByText('Stale · Low Confidence · Incomplete')).toBeVisible();
+    const owner = within(screen.getByRole('heading', { name: 'Tower Owner' }).closest('section'));
+    expect(owner.getByText('commercial.revenue').closest('li')).toHaveTextContent('Synthetic Lease and Cost Ledger');
+    expect(owner.queryByText('histories.inspection')).not.toBeInTheDocument();
+  });
+
   it('recovers from an unknown site without displaying an invalid assessment', async () => {
     window.localStorage.setItem('esdt.demo.session.v1', '{"v":1,"signedIn":true}');
     window.history.replaceState(null, '', '/#/assessments/MISSING/overview');

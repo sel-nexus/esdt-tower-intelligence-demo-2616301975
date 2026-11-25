@@ -3,12 +3,12 @@ import PropTypes from 'prop-types';
 import { useEffect, useRef } from 'react';
 import { AssessmentExport } from '../components/AssessmentExport.jsx';
 import { EvidencePanel } from '../components/EvidencePanel.jsx';
-import { GrowthPanel } from '../components/GrowthPanel.jsx';
+import { CommercialSnapshot, GrowthPanel } from '../components/GrowthPanel.jsx';
 import { usePortfolio } from '../components/PortfolioProvider.jsx';
 import { nextOperationalAction } from '../utils/actions.js';
 import { sortHistory } from '../utils/health.js';
 
-const heading = 'text-3xl font-semibold tracking-tight sm:text-4xl';
+const heading = 'decision-title text-3xl font-semibold tracking-tight sm:text-4xl';
 const link = 'inline-flex min-h-11 items-center font-semibold text-primary-700 underline underline-offset-4 focus-visible:outline-ring';
 const section = 'rounded-lg border border-border bg-surface p-5 sm:p-7';
 const componentLabels = { structure: 'Structure', equipment: 'Equipment', power: 'Power', maintenance: 'Maintenance', dataQuality: 'Data quality' };
@@ -148,7 +148,8 @@ export default function AssessmentPage({ siteId, tab = 'overview' }) {
     );
   }
 
-  const { health, inspection, findings, evidence, disclaimer, ref } = assessment;
+  const { health, inspection, findings, evidence, commercial, disclaimer, ref } = assessment;
+  const healthEvidenceNeedsReview = evidence.some(item => item.materiality === 'required' && !item.usable);
   const siteAlerts = alerts.filter(alert => alert.siteId === siteId);
   const nextAction = nextOperationalAction(actions, siteId);
   return (
@@ -156,23 +157,33 @@ export default function AssessmentPage({ siteId, tab = 'overview' }) {
       <header>
         <a href="#/assessments" className={link}>All assessments</a>
         <h1 className={heading} tabIndex={-1}>{site.siteId} · {site.name}</h1>
-        <p className="mt-2 text-sm text-foreground-muted">{snapshot.scenarioLabel} · {snapshot.referenceDate} (UTC) · {disclaimer}</p>
-        <nav aria-label="Assessment views" className="mt-4 flex flex-wrap gap-x-5 border-b border-border">
+        <p className="mt-2 text-sm text-foreground-muted">{site.city}, {site.state} · {snapshot.scenarioLabel} · {snapshot.referenceDate} (UTC)</p>
+        <nav aria-label="Assessment views" className="decision-tabs mt-4 flex flex-wrap gap-x-3 border-b border-border">
           <a href={overviewHref(siteId)} className={link} aria-current={tab === 'overview' ? 'page' : undefined}>Overview</a>
           <a href={`#/assessments/${encodeURIComponent(siteId)}/growth`} className={link} aria-current={tab === 'growth' ? 'page' : undefined}>Growth</a>
         </nav>
       </header>
       {tab === 'growth' ? <GrowthPanel readiness={assessment.readiness} commercial={assessment.commercial} /> : <>
       <section className={section} aria-labelledby="tower-health">
-        <h2 id="tower-health" className="text-xl font-semibold">Tower health</h2>
-        <p className="mt-3 text-2xl font-semibold tabular-nums">
-          <span className={bandStyles[health.band]}>{health.band}</span>{health.score === null ? '' : ` · ${health.score}/100`}
-        </p>
-        <p className="mt-2 text-sm">Next step: {nextAction?.nextStep ?? assessment.recommendation}</p>
-        <p className="mt-2 text-sm">
-          Latest inspection: {inspection.latestDate ?? 'Unknown'}
-          {inspection.expiryDate && ` · ${inspection.expired ? 'Expired' : inspection.due ? 'Due soon' : 'Within validity window'} · Expiry: ${inspection.expiryDate}`}
-        </p>
+        <div className="decision-grid decision-lead">
+          <div>
+            <h2 id="tower-health" className="decision-label">Tower health</h2>
+            <p className="decision-answer mt-2 tabular-nums">
+              <span className={bandStyles[health.band]}>{health.band}</span>{health.score === null ? '' : ` · ${health.score}/100`}
+            </p>
+            <p className="mt-3 text-sm">
+              Latest inspection: {inspection.latestDate ?? 'Unknown'}
+              {inspection.expiryDate && ` · ${inspection.expired ? 'Expired' : inspection.due ? 'Due soon' : 'Within validity window'} · Expiry: ${inspection.expiryDate}`}
+            </p>
+            {healthEvidenceNeedsReview && <p className="mt-2 text-sm">Required health evidence needs review. Check the findings and source records before relying on this assessment.</p>}
+          </div>
+          <div className="decision-note">
+            <p className="decision-label">{disclaimer}</p>
+            <h3 className="mt-2 font-semibold">Recommended next step</h3>
+            <p className="mt-1 text-sm">{nextAction?.nextStep ?? assessment.recommendation}</p>
+            <p className="mt-2 text-sm text-foreground-muted">Workshop recommendation only. No work order is issued.</p>
+          </div>
+        </div>
         <details className="mt-4 border-t border-border pt-2">
           <summary className="min-h-11 cursor-pointer py-2 text-sm font-semibold focus-visible:outline-ring">Health score breakdown</summary>
           <dl className="grid gap-3 text-sm sm:grid-cols-2">
@@ -193,6 +204,10 @@ export default function AssessmentPage({ siteId, tab = 'overview' }) {
           </dl>
         </details>
       </section>
+      <EvidencePanel evidence={[
+        ...evidence,
+        ...commercial.evidence.filter(row => !evidence.some(item => item.attribute === row.attribute)),
+      ]} />
       <section className={section} aria-labelledby="tower-findings">
         <h2 id="tower-findings" className="text-xl font-semibold">Findings</h2>
         {findings.length ? (
@@ -210,7 +225,7 @@ export default function AssessmentPage({ siteId, tab = 'overview' }) {
       </section>
       <section className={section} aria-labelledby="tower-alerts">
         <h2 id="tower-alerts" className="text-xl font-semibold">Alerts</h2>
-        <p className="mt-2 text-sm text-foreground-muted">Simulated · No operational request. Alert progress does not change the health score.</p>
+        <p className="mt-2 text-sm text-foreground-muted">Simulated · No operational request. Updating an alert does not advance its action or change the health score.</p>
         {state.lastCommandKind === 'setAlert' && state.result?.ok === false && (
           <p role="alert" className="mt-3 text-sm text-error">Alert status was not updated. Review the current alert before retrying.</p>
         )}
@@ -223,6 +238,7 @@ export default function AssessmentPage({ siteId, tab = 'overview' }) {
         ) : <p className="mt-3 text-sm">No registered alerts for this tower.</p>}
       </section>
       <TowerProfile site={site} />
+      <CommercialSnapshot commercial={commercial} title="Commercial snapshot" />
       <section className={section} aria-labelledby="tower-history">
         <h2 id="tower-history" className="text-xl font-semibold">Inspection and maintenance history</h2>
         <div className="mt-4 grid gap-5 sm:grid-cols-2">
@@ -230,7 +246,6 @@ export default function AssessmentPage({ siteId, tab = 'overview' }) {
           <History title="Maintenance" entries={site.histories.maintenance.value} />
         </div>
       </section>
-      <EvidencePanel evidence={evidence} />
       </>}
       <AssessmentExport key={siteId} assessmentRef={ref} />
     </div>

@@ -2,6 +2,7 @@
 /** Cover evidence precedence, provisional score bands and commercial projections. */
 import '@testing-library/jest-dom/vitest';
 import { act, cleanup, render, renderHook, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { createElement } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 import App from '../src/App.jsx';
@@ -178,21 +179,44 @@ describe('economics and committed projection', () => {
     expect(original.get(nyc.siteId).readiness.decidingRule).toBe('UPGRADE_FIT');
   });
 
-  it('renders the answer, validation, raw cents and Unknown on a growth deep link', () => {
+  it('renders the answer, validation, raw cents and Unknown on a growth deep link', async () => {
     window.localStorage.setItem('esdt.demo.session.v1', '{"v":1,"signedIn":true}');
     window.history.replaceState(null, '', `/#/assessments/${nyc.siteId}/growth`);
+    const user = userEvent.setup();
     const { unmount } = render(createElement(App));
     const fit = screen.getByRole('region', { name: 'Colocation readiness' });
     expect(within(fit).getByRole('status')).toHaveTextContent('Yes after an upgrade');
     expect(within(fit).getByText(/Certified structural and site validation/)).toBeVisible();
+    expect(within(fit).getByText('Indicative assessment only')).toBeVisible();
+    expect(within(fit).getByText(/the documented upgrade meets the modeled demand/)).toBeVisible();
     expect(screen.getByRole('link', { name: 'Growth' })).toHaveAttribute('aria-current', 'page');
     const economics = screen.getByRole('region', { name: 'Indicative economics' });
     expect(within(economics).getByText('$65,060')).toBeVisible();
     expect(within(economics).getByText('0.29 years')).toBeVisible();
     expect(within(economics).getByText('1024100')).toBeInTheDocument();
+    expect(within(economics).getByText('Tower Owner data')).toBeVisible();
+    expect(within(fit).queryByText('$65,060')).not.toBeInTheDocument();
+    await user.click(screen.getByText('Evidence and sources'));
+    const technical = within(screen.getByRole('heading', { name: 'ESDT-Aligned' }).closest('section'));
+    const futureFit = within(technical.getByText('Power upgrade future fit').closest('li'));
+    expect(futureFit.getByText('Synthetic Future Fit Worksheet · Synthetic')).toBeVisible();
+    expect(futureFit.getByText('Completeness: complete · Confidence: 92%')).toBeVisible();
+    expect(futureFit.getByText('Current')).toBeVisible();
     unmount();
     window.history.replaceState(null, '', `/#/assessments/${dal.siteId}/growth`);
     render(createElement(App));
     expect(screen.getByText('Payback: Investment and annual upside both need current evidence.')).toBeVisible();
+  });
+
+  it('keeps the unknown score, expired validation and required evidence visible for LAX', () => {
+    window.localStorage.setItem('esdt.demo.session.v1', '{"v":1,"signedIn":true}');
+    window.history.replaceState(null, '', '/#/assessments/LAX-60214/growth');
+    render(createElement(App));
+    const fit = within(screen.getByRole('region', { name: 'Colocation readiness' }));
+    expect(fit.getByRole('status')).toHaveTextContent('Need More Information');
+    expect(fit.getByText('Technical readiness score:').closest('p')).toHaveTextContent('Technical readiness score: Unknown');
+    expect(fit.getByText('Renew the expired inspection')).toBeVisible();
+    expect(fit.getByText(/Structure status: Stale.*required for fit/)).toBeVisible();
+    expect(fit.getByText(/Collect current, complete records/)).toBeVisible();
   });
 });

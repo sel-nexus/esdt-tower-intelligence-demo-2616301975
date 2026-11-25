@@ -10,8 +10,11 @@ try {
   for (const [name, viewport] of Object.entries({ desktop: { width: 1366, height: 900 }, mobile: { width: 390, height: 844 } })) {
     const page = await browser.newPage({ viewport });
     await page.goto(base);
-    await page.getByRole('button', { name: 'Portfolio Manager', exact: true }).click();
     const captures = [];
+    await page.getByRole('button', { name: 'Portfolio Manager', exact: true }).waitFor();
+    await page.screenshot({ path: `${out}/${name}-entry.png` });
+    captures.push({ state: 'persona entry', tree: await page.locator('body').ariaSnapshot(), styles: await page.evaluate(() => ({ font: getComputedStyle(document.body).fontFamily, width: document.body.scrollWidth, viewport: innerWidth })), html: await page.content() });
+    await page.getByRole('button', { name: 'Portfolio Manager', exact: true }).click();
     for (const [state, link] of [['portfolio', null], ['map', 'Tower Map']]) {
       if (link) await page.getByRole('navigation', { name: 'Workshop' }).getByRole('link', { name: link, exact: true }).click();
       await page.getByRole('heading', { level: 1, name: state === 'portfolio' ? /portfolio/i : /tower map/i }).waitFor();

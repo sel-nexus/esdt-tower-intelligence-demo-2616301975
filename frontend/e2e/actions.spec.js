@@ -29,6 +29,11 @@ test('completes an upgrade and downloads the captured assessment unchanged after
   await page.getByRole('link', { name: 'Actions', exact: true }).click();
   await expect(page).toHaveURL(/#\/actions$/);
   await expect(page.getByRole('heading', { level: 1 })).toBeFocused();
+  await page.getByLabel('Action queue').selectOption('Missing Information');
+  await expect(page.getByRole('link', { name: /LAX-60214/ })).toBeVisible();
+  await page.getByLabel('Action queue').selectOption('Power Upgrades');
+  await expect(page.getByRole('link', { name: 'NYC-10234 · Power upgrade' })).toBeVisible();
+  await expect(page.getByRole('link', { name: /cabinet upgrade/i })).toHaveCount(0);
   await page.getByLabel('Action queue').selectOption('Upgrade Required');
   const actionLink = page.getByRole('link', { name: 'NYC-10234 · Power upgrade' });
   const row = page.getByRole('listitem').filter({ has: actionLink });
