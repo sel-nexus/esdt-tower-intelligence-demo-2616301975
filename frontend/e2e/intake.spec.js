@@ -44,7 +44,13 @@ test('enters from signed out, keeps literal samples across reset and reload, and
   await expect(page).toHaveURL(/#\/sign-in$/);
   await expect(page.getByRole('navigation', { name: 'Workshop' })).toHaveCount(0);
   const requests = [];
-  const capture = request => { if (/^https?:/i.test(request.url())) requests.push(`${request.method()} ${request.url()}`); };
+  const capture = request => {
+    if (!/^https?:/i.test(request.url())) return;
+    // Chromium can revalidate the public icon on hash navigation; no workflow data is sent.
+    const icon = new URL('/favicon.svg', page.url()).href;
+    if (request.method() === 'GET' && request.resourceType() === 'other' && request.url() === icon) return;
+    requests.push(`${request.method()} ${request.url()}`);
+  };
   page.on('request', capture);
 
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();

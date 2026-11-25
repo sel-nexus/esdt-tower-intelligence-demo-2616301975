@@ -12,7 +12,13 @@ test('completes an upgrade and downloads the captured assessment unchanged after
   await page.goto('/');
   const controls = page.getByRole('region', { name: 'Facilitator controls' });
   await expect(controls).toBeVisible();
-  page.on('request', request => { if (/^https?:/i.test(request.url())) requests.push(`${request.method()} ${request.url()}`); });
+  page.on('request', request => {
+    if (!/^https?:/i.test(request.url())) return;
+    // Chromium can revalidate the public icon on hash navigation; no workflow data is sent.
+    const icon = new URL('/favicon.svg', page.url()).href;
+    if (request.method() === 'GET' && request.resourceType() === 'other' && request.url() === icon) return;
+    requests.push(`${request.method()} ${request.url()}`);
+  });
 
   // A missing battery reading supplies a named gap without changing the power-upgrade decision.
   await controls.getByLabel('Tower', { exact: true }).selectOption('NYC-10234');
