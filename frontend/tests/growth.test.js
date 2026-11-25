@@ -2,6 +2,7 @@
 /** Cover evidence precedence, provisional score bands and commercial projections. */
 import '@testing-library/jest-dom/vitest';
 import { act, cleanup, render, renderHook, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { createElement } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 import App from '../src/App.jsx';
@@ -69,6 +70,16 @@ describe('readiness', () => {
     ]));
   });
 
+  it('answers No for a confirmed safety issue even when the unchanged score qualifies for Yes', () => {
+    const clear = assessReadiness(snapshot, dal);
+    const site = { ...dal, condition: { ...dal.condition, criticalSafety: value(dal.condition.criticalSafety, true) } };
+    const blocked = assessReadiness(snapshot, site);
+    expect(clear.answer).toBe('Yes');
+    expect(clear.score).toBeGreaterThanOrEqual(snapshot.config.readinessBands.yes);
+    expect(blocked).toMatchObject({ answer: 'No', decidingRule: 'HARD_BLOCKER', score: clear.score });
+    expect(blocked.constraints).toContain('Unresolved critical safety issue');
+  });
+
   it.each([[3.99, 'HARD_BLOCKER'], [4, 'UPGRADE_FIT'], [5, 'UPGRADE_FIT']])(
     'uses the inclusive provisional boundary at tolerance %s kW', (powerToleranceKw, decidingRule) => {
       const result = assessReadiness({ ...snapshot, config: { ...snapshot.config, powerToleranceKw } }, nyc);
@@ -100,7 +111,64 @@ describe('readiness', () => {
     const result = assessReadiness(partial, atl);
     expect(result).toMatchObject({ decidingRule: 'MATERIAL_GAP', remedies: [], effectiveInputs: { spaceDeficit: 1, afterCapacities: { cabinet: 4 } } });
     expect(result.gaps).toContainEqual(expect.objectContaining({ attribute: 'upgrades.cabinet.futureFit', flags: ['Incomplete'] }));
-    expect(assessReadiness(snapshot, { ...atl, upgrades: value(atl.upgrades, []) })).toMatchObject({ decidingRule: 'HARD_BLOCKER' });
+  });
+
+  it('asks for cabinet feasibility evidence when the current complete record explicitly says unverified', () => {
+    const site = { ...atl, upgrades: value(atl.upgrades, [{ ...atl.upgrades.value[0], feasibility: 'unverified' }]) };
+    const result = assessReadiness(snapshot, site);
+    const unresolved = ['Cabinet shortfall: 1 unit', 'Cabinet upgrade fit is unverified'];
+    expect(result).toMatchObject({ answer: 'Need More Information', currentFit: false, remedies: [],
+      effectiveInputs: { 'space.requiredCabinetUnits': 2, spaceDeficit: 1, afterCapacities: { cabinet: 4 } },
+      evidence: expect.arrayContaining([
+        expect.objectContaining({ attribute: 'upgrades.cabinet.afterCapacity', value: 4, freshness: 'Current', completeness: 'complete', usable: true }),
+        expect.objectContaining({ attribute: 'upgrades.cabinet.futureFit', value: 'unverified', freshness: 'Current', completeness: 'complete', usable: true }),
+      ]),
+      constraints: expect.arrayContaining(unresolved),
+    });
+    expect(result.gaps.filter(row => row.materiality === 'required')).toEqual([]);
+    expect(result.recommendation).toMatch(/document that the proposed cabinet upgrade is feasible and meets the tenant’s cabinet demand/i);
+
+    const stricter = { ...snapshot, config: { ...snapshot.config,
+      readinessBands: { information: 98, upgrade: 99, yes: 100 } } };
+    const belowBand = assessReadiness(stricter, site);
+    expect(belowBand.score).toBeLessThan(stricter.config.readinessBands.information);
+    expect(belowBand).toMatchObject({ answer: 'Need More Information', recommendation: result.recommendation });
+
+    const unsafe = { ...site, condition: { ...site.condition, criticalSafety: value(site.condition.criticalSafety, true) } };
+    const blocked = assessReadiness(snapshot, unsafe);
+    expect(blocked).toMatchObject({ answer: 'No', decidingRule: 'HARD_BLOCKER', currentFit: false, remedies: [],
+      constraints: expect.arrayContaining(['Unresolved critical safety issue', ...unresolved]),
+    });
+    expect(blocked.recommendation).toContain('Unresolved critical safety issue');
+    expect(blocked.recommendation).not.toMatch(/cabinet/i);
+  });
+
+  it.each([
+    ['missing catalog', snapshot, value(atl.upgrades, null), 'upgrades', 'Missing'],
+    ['stale catalog listing no remedy', withEvidence(atl.upgrades.evidenceId, { asOf: '2023-12-01' }), value(atl.upgrades, []), 'upgrades', 'Stale'],
+    ['missing after-capacity evidence', withEvidence(atl.upgrades.value[0].evidenceId, { asOf: null }), atl.upgrades, 'upgrades.cabinet.afterCapacity', 'Missing'],
+    ['stale after-capacity evidence', withEvidence(atl.upgrades.value[0].evidenceId, { asOf: '2023-12-01' }), atl.upgrades, 'upgrades.cabinet.afterCapacity', 'Stale'],
+  ])('treats %s as a material gap and retains a separate blocker', (_, input, upgrades, attribute, freshness) => {
+    const site = { ...atl, upgrades };
+    const gap = expect.objectContaining({ attribute, freshness, materiality: 'required' });
+    expect(assessReadiness(input, site)).toMatchObject({ answer: 'Need More Information', decidingRule: 'MATERIAL_GAP',
+      currentFit: false, remedies: [], gaps: expect.arrayContaining([gap]) });
+
+    const unsafe = { ...site, condition: { ...site.condition, criticalSafety: value(site.condition.criticalSafety, true) } };
+    const blocked = assessReadiness(input, unsafe);
+    expect(blocked).toMatchObject({ answer: 'No', decidingRule: 'HARD_BLOCKER', gaps: expect.arrayContaining([gap]) });
+    expect(blocked.recommendation).toContain('Unresolved critical safety issue');
+    expect(blocked.recommendation).not.toMatch(/cabinet/i);
+  });
+
+  it.each([
+    ['absent', []],
+    ['undersized', [{ ...atl.upgrades.value[0], afterCapacity: 1 }]],
+    ['infeasible', [{ ...atl.upgrades.value[0], feasibility: 'infeasible' }]],
+  ])('blocks a cabinet shortfall when current evidence confirms the remedy is %s', (_, proposals) => {
+    const site = { ...atl, upgrades: value(atl.upgrades, proposals) };
+    expect(assessReadiness(snapshot, site)).toMatchObject({ answer: 'No', decidingRule: 'HARD_BLOCKER',
+      currentFit: false, remedies: [], effectiveInputs: { spaceDeficit: 1 } });
   });
 
   it('checks each remedy and required fiber before confirming combined future fit', () => {
@@ -178,21 +246,44 @@ describe('economics and committed projection', () => {
     expect(original.get(nyc.siteId).readiness.decidingRule).toBe('UPGRADE_FIT');
   });
 
-  it('renders the answer, validation, raw cents and Unknown on a growth deep link', () => {
+  it('renders the answer, validation, raw cents and Unknown on a growth deep link', async () => {
     window.localStorage.setItem('esdt.demo.session.v1', '{"v":1,"signedIn":true}');
     window.history.replaceState(null, '', `/#/assessments/${nyc.siteId}/growth`);
+    const user = userEvent.setup();
     const { unmount } = render(createElement(App));
     const fit = screen.getByRole('region', { name: 'Colocation readiness' });
     expect(within(fit).getByRole('status')).toHaveTextContent('Yes after an upgrade');
     expect(within(fit).getByText(/Certified structural and site validation/)).toBeVisible();
+    expect(within(fit).getByText('Indicative assessment only')).toBeVisible();
+    expect(within(fit).getByText(/the documented upgrade meets the modeled demand/)).toBeVisible();
     expect(screen.getByRole('link', { name: 'Growth' })).toHaveAttribute('aria-current', 'page');
     const economics = screen.getByRole('region', { name: 'Indicative economics' });
     expect(within(economics).getByText('$65,060')).toBeVisible();
     expect(within(economics).getByText('0.29 years')).toBeVisible();
     expect(within(economics).getByText('1024100')).toBeInTheDocument();
+    expect(within(economics).getByText('Tower Owner data')).toBeVisible();
+    expect(within(fit).queryByText('$65,060')).not.toBeInTheDocument();
+    await user.click(screen.getByText('Evidence and sources'));
+    const technical = within(screen.getByRole('heading', { name: 'ESDT-Aligned' }).closest('section'));
+    const futureFit = within(technical.getByText('Power upgrade future fit').closest('li'));
+    expect(futureFit.getByText('Synthetic Future Fit Worksheet · Synthetic')).toBeVisible();
+    expect(futureFit.getByText('Completeness: complete · Confidence: 92%')).toBeVisible();
+    expect(futureFit.getByText('Current')).toBeVisible();
     unmount();
     window.history.replaceState(null, '', `/#/assessments/${dal.siteId}/growth`);
     render(createElement(App));
     expect(screen.getByText('Payback: Investment and annual upside both need current evidence.')).toBeVisible();
+  });
+
+  it('keeps the unknown score, expired validation and required evidence visible for LAX', () => {
+    window.localStorage.setItem('esdt.demo.session.v1', '{"v":1,"signedIn":true}');
+    window.history.replaceState(null, '', '/#/assessments/LAX-60214/growth');
+    render(createElement(App));
+    const fit = within(screen.getByRole('region', { name: 'Colocation readiness' }));
+    expect(fit.getByRole('status')).toHaveTextContent('Need More Information');
+    expect(fit.getByText('Technical readiness score:').closest('p')).toHaveTextContent('Technical readiness score: Unknown');
+    expect(fit.getByText('Renew the expired inspection')).toBeVisible();
+    expect(fit.getByText(/Structure status: Stale.*required for fit/)).toBeVisible();
+    expect(fit.getByText(/Collect current, complete records/)).toBeVisible();
   });
 });

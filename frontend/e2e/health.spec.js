@@ -1,7 +1,7 @@
 /** Follow the assessment links and simulated alert workflow in the workshop. */
 import { expect, test } from '@playwright/test';
 
-test('shows tower profile, history and health, and keeps the score and findings after closing a simulated alert', async ({ page }) => {
+test('shows inspection work and keeps Chicago health, corrosion alert and remediation progress independent through reset', async ({ page }) => {
   const errors = [];
   page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
   page.on('pageerror', error => errors.push(error.message));
@@ -37,11 +37,74 @@ test('shows tower profile, history and health, and keeps the score and findings 
   await expect(health).toContainText('Latest inspection: 2023-12-15 · Expired');
   await expect(findings).toContainText('Severe corrosion observed.');
   await expect(alerts).toContainText('No operational request.');
-  await expect(alerts.getByRole('button', { name: /close alert: severe corrosion/i })).toHaveCount(0);
-  await alerts.getByRole('button', { name: /acknowledge alert: severe corrosion/i }).click();
-  await expect(alerts.getByText('Alert status: Acknowledged')).toBeVisible();
-  await alerts.getByRole('button', { name: /close alert: severe corrosion/i }).click();
-  await expect(alerts.getByText('Alert status: Closed')).toBeFocused();
+  const corrosion = alerts.getByRole('listitem').filter({ hasText: 'Severe corrosion observed.' });
+  const corrosionStatus = corrosion.getByRole('status');
+  await expect(corrosionStatus).toHaveText('Alert status: Open');
+  await expect(corrosion.getByRole('button', { name: /close alert: severe corrosion/i })).toHaveCount(0);
+
+  const actionsLink = page.getByRole('link', { name: 'Actions', exact: true });
+  const queue = page.getByLabel('Action queue');
+  await actionsLink.click();
+  await queue.selectOption('Inspection Due');
+  const inspectionLink = page.getByRole('link', { name: 'CHI-40117 · Inspection', exact: true });
+  const inspectionRow = page.getByRole('listitem').filter({ has: inspectionLink });
+  await expect(inspectionRow).toContainText('Why this is queued: Inspection has expired.');
+  await expect(inspectionRow).toContainText('Severity: High · Due: 2024-12-14');
+  await expect(inspectionRow).toContainText('Recommended next step: Schedule a new inspection.');
+  await expect(page.getByRole('link', { name: 'CHI-40117 · Remediation', exact: true })).toHaveCount(0);
+  await inspectionLink.click();
+  await expect(health).toContainText('Latest inspection: 2023-12-15 · Expired · Expiry: 2024-12-14');
+
+  await actionsLink.click();
+  await queue.selectOption('Critical Sites');
+  const remediationLink = page.getByRole('link', { name: 'CHI-40117 · Remediation', exact: true });
+  const remediation = page.getByRole('listitem').filter({ has: remediationLink });
+  const progress = remediation.getByRole('status');
+  await expect(remediation).toContainText('Why this is queued: Severe corrosion observed.');
+  await expect(progress).toHaveText('Progress: Open · Alert status: Open');
+  await remediation.getByRole('button', { name: 'Start action' }).click();
+  await expect(progress).toHaveText('Progress: In Progress · Alert status: Open');
+
+  await remediationLink.click();
+  await expect(corrosionStatus).toHaveText('Alert status: Open');
+  await corrosion.getByRole('button', { name: /acknowledge alert: severe corrosion/i }).click();
+  await expect(corrosion.getByText('Alert status: Acknowledged')).toBeVisible();
+  await corrosion.getByRole('button', { name: /close alert: severe corrosion/i }).click();
+  await expect(corrosion.getByText('Alert status: Closed')).toBeFocused();
+  await expect(health).toContainText('Critical · 53/100');
+  await expect(findings).toContainText('Severe corrosion observed.');
+
+  await actionsLink.click();
+  await queue.selectOption('Critical Sites');
+  await expect(progress).toHaveText('Progress: In Progress · Alert status: Closed');
+  await remediation.getByRole('button', { name: 'Mark Completed' }).click();
+  await expect(progress).toHaveText('Progress: Completed · Alert status: Closed');
+
+  const diagnostics = page.getByText('Diagnostics', { exact: true });
+  const events = page.getByRole('list', { name: 'Recent local events' });
+  const workflowEvents = events.getByRole('listitem').filter({ hasText: /(?:ACTION_STATUS_CHANGED · baseline · CHI-40117:remediation|ALERT_STATUS_CHANGED · baseline · CHI-40117:corrosion)/ });
+  await diagnostics.click();
+  await expect(events).toBeVisible();
+  await expect(workflowEvents).toHaveText([
+    /ACTION_STATUS_CHANGED · baseline · CHI-40117:remediation · In Progress → Completed/,
+    /ALERT_STATUS_CHANGED · baseline · CHI-40117:corrosion · Acknowledged → Closed/,
+    /ALERT_STATUS_CHANGED · baseline · CHI-40117:corrosion · Open → Acknowledged/,
+    /ACTION_STATUS_CHANGED · baseline · CHI-40117:remediation · Open → In Progress/,
+  ]);
+  const beforeReset = await workflowEvents.allTextContents();
+
+  await page.getByRole('button', { name: 'Reset workshop' }).click();
+  await expect(page).toHaveURL(/#\/portfolio$/);
+  await actionsLink.click();
+  await queue.selectOption('Critical Sites');
+  await expect(progress).toHaveText('Progress: Open · Alert status: Open');
+  await diagnostics.click();
+  await expect(events).toBeVisible();
+  await expect(events.getByText(/PORTFOLIO_RESET · baseline/)).toHaveCount(1);
+  await expect(workflowEvents).toHaveText(beforeReset);
+
+  await remediationLink.click();
+  await expect(corrosionStatus).toHaveText('Alert status: Open');
   await expect(health).toContainText('Critical · 53/100');
   await expect(findings).toContainText('Severe corrosion observed.');
 

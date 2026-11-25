@@ -1,28 +1,23 @@
-/** Manage the browser-only workshop gate; the public marker grants no authorization. */
-export const CREDENTIALS_KEY = 'esdt.demo.credentials.v1';
+/** Remember a workshop perspective in this browser, not an identity or permission. */
 export const SESSION_KEY = 'esdt.demo.session.v1';
-export const DEMO_CREDENTIALS = Object.freeze({ v: 1, username: 'tower-demo', password: 'synthetic-only' });
 
-/**
- * Check an exact stored object against a known envelope.
- * Args:
- *   raw: Serialized browser value, or null for an absent key.
- *   expected: Known fields and their required values.
- * Returns:
- *   Whether the stored value has exactly the required shape and values.
- */
-function matches(raw, expected) {
-  try {
-    const value = JSON.parse(raw);
-    return Boolean(value && typeof value === 'object' && !Array.isArray(value)
-      && Object.keys(value).length === Object.keys(expected).length
-      && Object.entries(expected).every(([key, entry]) => value[key] === entry));
-  } catch {
-    return false;
-  }
+export const PERSONAS = Object.freeze({
+  portfolio: { name: 'Portfolio Manager', route: '#/portfolio', start: 'Portfolio overview',
+    description: 'Review portfolio KPIs and find sites that need attention.' },
+  asset: { name: 'Asset Manager', route: '#/assessments', start: 'Assessment picker',
+    description: 'Review tower condition, inspection history and supporting evidence.' },
+  commercial: { name: 'Colocation / Commercial Manager', route: '#/actions/growth', start: 'Growth Opportunities',
+    description: 'Compare colocation candidates, upgrade needs and indicative payback.' },
+  operations: { name: 'Operations Manager', route: '#/actions/critical', start: 'Critical Sites',
+    description: 'Triage critical sites, inspections and maintenance follow-ups.' },
+  facilitator: { name: 'Demonstration Facilitator', route: '#/portfolio', start: 'Portfolio & scenario controls',
+    description: 'Replay scenarios, adjust thresholds and show how decisions change.' },
+});
+
+/** Accept only registered persona IDs, not arbitrary browser or form values. */
+function isPersona(id) {
+  return typeof id === 'string' && Object.hasOwn(PERSONAS, id);
 }
-
-const session = Object.freeze({ v: 1, signedIn: true });
 
 /**
  * Restore only a valid workshop marker, without writing storage.
@@ -32,52 +27,55 @@ const session = Object.freeze({ v: 1, signedIn: true });
  *   Session state or a safe fail-closed recovery code.
  */
 export function resumeSession(storage) {
+  let raw;
   try {
-    const raw = (storage ?? window.localStorage).getItem(SESSION_KEY);
-    if (raw === null) return { ok: true, signedIn: false };
-    if (matches(raw, session)) return { ok: true, signedIn: true };
-    return { ok: false, signedIn: false, code: 'STORE_VERSION_INVALID' };
+    raw = (storage ?? window.localStorage).getItem(SESSION_KEY);
   } catch {
-    return { ok: false, signedIn: false, code: 'STORAGE_UNAVAILABLE' };
+    return { ok: false, code: 'STORAGE_UNAVAILABLE' };
   }
+  if (raw === null) return { ok: true };
+  try {
+    const saved = JSON.parse(raw);
+    if (saved && typeof saved === 'object' && Object.keys(saved).length === 2) {
+      // Keep older entered sessions and their deep links working without a startup write.
+      if (saved.v === 1 && saved.signedIn === true) return { ok: true, persona: 'portfolio' };
+      if (saved.v === 2 && isPersona(saved.persona)) return { ok: true, persona: saved.persona };
+    }
+  } catch {
+    return { ok: false, code: 'STORE_VERSION_INVALID' };
+  }
+  return { ok: false, code: 'STORE_VERSION_INVALID' };
 }
 
 /**
- * Start the workshop only after persisting the marker for the exact public pair.
+ * Commit a selected role only after saving the browser marker.
  * Args:
- *   username: Attempted fictitious username, compared without normalization.
- *   password: Attempted fictitious password, compared without normalization.
+ *   persona: Selected workshop role identifier.
  *   storage: Optional browser-compatible storage for this operation.
  * Returns:
- *   Session state or a safe error code; attempted values are never persisted.
+ *   The selected role or a recoverable error code.
  */
-export function signIn(username, password, storage) {
-  if (username !== DEMO_CREDENTIALS.username || password !== DEMO_CREDENTIALS.password) {
-    return { ok: false, code: 'DEMO_INPUT_INVALID' };
-  }
+export function selectPersona(persona, storage) {
+  if (!isPersona(persona)) return { ok: false, code: 'UNKNOWN_PERSONA' };
   try {
-    const store = storage ?? window.localStorage;
-    if (!matches(store.getItem(CREDENTIALS_KEY), DEMO_CREDENTIALS)) {
-      store.setItem(CREDENTIALS_KEY, JSON.stringify(DEMO_CREDENTIALS));
-    }
-    store.setItem(SESSION_KEY, JSON.stringify(session));
-    return { ok: true, signedIn: true };
+    (storage ?? window.localStorage).setItem(SESSION_KEY, JSON.stringify({ v: 2, persona }));
+    return { ok: true, persona };
   } catch {
     return { ok: false, code: 'STORAGE_UNAVAILABLE' };
   }
 }
 
 /**
- * Remove only the workshop marker, without touching retained samples or credentials.
+ * Remove only the workshop marker, without touching retained samples.
  * Args:
  *   storage: Optional browser-compatible storage for this operation.
  * Returns:
- *   Signed-out state on success, or a pending-clear result without confirming deletion.
+ *   An exited session or a pending-clear result without confirming deletion.
  */
-export function signOut(storage) {
+export function exitSession(storage) {
   try {
     (storage ?? window.localStorage).removeItem(SESSION_KEY);
-    return { ok: true, signedIn: false };
+    return { ok: true };
   } catch {
     return { ok: false, code: 'SESSION_CLEAR_FAILED', phase: 'pending-clear' };
   }

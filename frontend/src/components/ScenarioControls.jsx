@@ -7,6 +7,8 @@ import { usePortfolio } from './PortfolioProvider.jsx';
 const focus = 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring';
 const field = `mt-2 block min-h-11 w-full rounded-md border border-border bg-surface px-3 text-sm ${focus}`;
 const button = `min-h-11 rounded-md px-4 text-sm font-semibold ${focus}`;
+const defaultSiteId = 'NYC-10234';
+const defaultEvidencePath = 'power.headroomKw';
 const errors = {
   INVALID_SETTINGS: 'Enter a finite, non-negative tolerance in kW. The effective tolerance is unchanged.',
   INVALID_MASK: 'Choose a supported evidence field.',
@@ -19,21 +21,22 @@ const errors = {
 export function ScenarioControls() {
   const { state, snapshot, send } = usePortfolio();
   const id = useId();
-  const [siteId, setSiteId] = useState('NYC-10234');
-  const [path, setPath] = useState('power.headroomKw');
+  const [siteId, setSiteId] = useState(defaultSiteId);
+  const [path, setPath] = useState(defaultEvidencePath);
   const effective = snapshot?.config.powerToleranceKw;
   const [draft, setDraft] = useState(String(effective ?? ''));
   const errorCode = state.result?.ok === false ? state.result.code : null;
+  const resetCommandId = state.lastCommandKind === 'reset' && state.result?.ok ? state.lastCommandId : null;
 
   useEffect(() => { setDraft(String(effective ?? '')); }, [effective]);
 
-  /** Restore committed rules and reset the facilitator form selections. */
-  function reset() {
-    setDraft(String(state.base.config.powerToleranceKw));
-    setSiteId('NYC-10234');
-    setPath('power.headroomKw');
-    send({ kind: 'reset' });
-  }
+  // Observe both reset buttons, including repeated resets with an unchanged snapshot.
+  useEffect(() => {
+    if (resetCommandId === null) return;
+    setDraft(String(effective ?? ''));
+    setSiteId(defaultSiteId);
+    setPath(defaultEvidencePath);
+  }, [effective, resetCommandId]);
 
   /** Submit a finite numeric draft or let the reducer reject the transaction. */
   function apply(event) {
@@ -57,7 +60,7 @@ export function ScenarioControls() {
           <h2 id={`${id}-heading`} className="text-xl font-semibold tracking-tight">Facilitator controls</h2>
           <p className="mt-1 text-sm text-foreground-muted">Changes stay in this tab and do not alter the fixture.</p>
         </div>
-        <button type="button" onClick={reset} className={`${button} border border-border hover:bg-surface-raised`}>Reset baseline</button>
+        <button type="button" onClick={() => send({ kind: 'reset' })} className={`${button} border border-border hover:bg-surface-raised`}>Reset baseline</button>
       </div>
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
         <div>

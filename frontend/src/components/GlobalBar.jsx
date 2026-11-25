@@ -2,11 +2,29 @@
 import PropTypes from 'prop-types';
 import { useId, useRef, useState } from 'react';
 import { overviewHref } from '../pages/AssessmentPage.jsx';
+import { PERSONAS } from '../utils/session.js';
 import { usePortfolio } from './PortfolioProvider.jsx';
 
 export const focus = 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring';
 const control = `min-h-11 rounded-md border border-border bg-surface px-3 text-sm ${focus}`;
 const navItems = [['portfolio', 'Portfolio'], ['map', 'Tower Map'], ['assessments', 'Assessments'], ['actions', 'Actions'], ['help', 'Help'], ['samples', 'Samples']];
+
+/** Identify the workshop consistently on the entry screen and in the shell. */
+export function WorkshopBrand() {
+  return (
+    <div className="flex min-w-0 items-center gap-3">
+      <span className="workshop-brand-icon grid size-10 shrink-0 place-items-center rounded-md">
+        <svg viewBox="0 0 24 24" width="23" height="23" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M7 21l5-15 5 15M9 16h6m-7 3h8M6.5 4.5a7.5 7.5 0 0 0 0 9m11-9a7.5 7.5 0 0 1 0 9" />
+        </svg>
+      </span>
+      <div>
+        <p className="text-xs font-medium uppercase tracking-[.14em] text-foreground-muted">ESDT · Synthetic workshop</p>
+        <p className="font-semibold tracking-tight">Tower Intelligence</p>
+      </div>
+    </div>
+  );
+}
 
 /** Open the same assessment route from search, shortlists, markers and rows. */
 export function TowerLink({ siteId, children, label, className, onFocus, onBlur, onPointerEnter, onPointerLeave }) {
@@ -36,12 +54,17 @@ TowerLink.propTypes = {
  * Args:
  *   active: Current navigation destination, if registered.
  *   route: Current hash used to collapse search between views.
- *   onSignOut: Close the local workshop gate.
+ *   persona: Active demo perspective shown on the disclosure.
+ *   onSelectPersona: Request another role without resetting the workshop.
+ *   onExit: Close the local workshop.
+ *   sessionError: Whether the requested role change could not be saved.
  */
-export function GlobalBar({ active, route, onSignOut }) {
+export function GlobalBar({ active, route, persona, onSelectPersona, onExit, sessionError }) {
   const { snapshot, state, discovery, send } = usePortfolio();
   const id = useId();
   const searchInput = useRef(null);
+  const roleDisclosure = useRef(null);
+  const roleSummary = useRef(null);
   const [searchRoute, setSearchRoute] = useState(null);
   const query = state.discovery.query;
   const expanded = searchRoute === route && Boolean(snapshot);
@@ -59,21 +82,11 @@ export function GlobalBar({ active, route, onSignOut }) {
   }
 
   return (
-    <header className="border-b border-border bg-surface">
+    <header className="workshop-shell border-b border-border bg-surface">
       <div className="mx-auto max-w-6xl px-5 sm:px-8">
         <div className="flex flex-wrap items-center justify-between gap-x-8 gap-y-3 border-b border-border py-4">
-          <div className="flex items-center gap-3">
-            <span className="grid size-9 shrink-0 place-items-center rounded-md border border-border text-primary-700">
-              <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
-                <path d="M7 21l5-15 5 15M9 16h6m-7 3h8M6.5 4.5a7.5 7.5 0 0 0 0 9m11-9a7.5 7.5 0 0 1 0 9" />
-              </svg>
-            </span>
-            <div>
-              <p className="text-xs font-medium uppercase tracking-[.14em] text-foreground-muted">ESDT · Synthetic workshop</p>
-              <p className="font-semibold tracking-tight">Tower Intelligence</p>
-            </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
+          <WorkshopBrand />
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
             {snapshot && (
               <>
                 <label htmlFor={`${id}-scenario`} className="text-sm text-foreground-muted">Active scenario</label>
@@ -84,8 +97,42 @@ export function GlobalBar({ active, route, onSignOut }) {
               </>
             )}
             <button type="button" onClick={reset} className={`${control} hover:bg-surface-raised`}>Reset workshop</button>
-            <button type="button" onClick={onSignOut} className={`${control} hover:bg-surface-raised`}>Sign out</button>
+            {persona && (
+              <details ref={roleDisclosure} className="workshop-role-disclosure relative min-w-0 max-w-full"
+                onBlur={event => {
+                  if (!event.currentTarget.contains(event.relatedTarget)) event.currentTarget.open = false;
+                }}
+                onKeyDown={event => {
+                  if (event.key === 'Escape' && event.currentTarget.open) {
+                    roleSummary.current.focus();
+                    event.currentTarget.open = false;
+                  }
+                }}>
+                <summary ref={roleSummary} className={`${control} flex cursor-pointer items-center gap-2 py-2 text-start hover:bg-surface-raised`}>
+                  <span>
+                    <span className="block text-xs text-foreground-muted">Demo role</span>
+                    <span className="font-semibold">{PERSONAS[persona].name}</span>
+                  </span>
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true" className="shrink-0">
+                    <path d="m6 9 6 6 6-6" />
+                  </svg>
+                </summary>
+                <div className="workshop-role-options rounded-md border border-border bg-surface p-2 shadow-sm">
+                  <p className="px-2 py-2 text-xs font-semibold text-foreground-muted">Switch demo role</p>
+                  {Object.entries(PERSONAS).filter(([id]) => id !== persona).map(([id, role]) => (
+                    <button key={id} type="button" className={`block min-h-11 w-full rounded px-2 text-left text-sm hover:bg-surface-raised ${focus}`}
+                      onClick={() => {
+                        roleSummary.current.focus();
+                        roleDisclosure.current.open = false;
+                        onSelectPersona(id);
+                      }}>{role.name}</button>
+                  ))}
+                  <button type="button" className={`mt-1 block min-h-11 w-full border-t border-border px-2 text-left text-sm hover:bg-surface-raised ${focus}`} onClick={onExit}>Exit workshop</button>
+                </div>
+              </details>
+            )}
           </div>
+          {sessionError && <p role="alert" className="w-full text-sm text-error">Could not switch roles. Your current role and workshop changes are unchanged. Check browser storage and try again.</p>}
         </div>
         <div className="flex flex-wrap items-center justify-between gap-x-6 pb-3 sm:pb-0">
           <nav aria-label="Workshop" className="flex flex-wrap gap-x-4 sm:gap-x-6">
@@ -145,4 +192,7 @@ export function GlobalBar({ active, route, onSignOut }) {
   );
 }
 
-GlobalBar.propTypes = { active: PropTypes.string, route: PropTypes.string.isRequired, onSignOut: PropTypes.func.isRequired };
+GlobalBar.propTypes = {
+  active: PropTypes.string, route: PropTypes.string.isRequired, persona: PropTypes.oneOf(Object.keys(PERSONAS)),
+  onSelectPersona: PropTypes.func, onExit: PropTypes.func, sessionError: PropTypes.string,
+};

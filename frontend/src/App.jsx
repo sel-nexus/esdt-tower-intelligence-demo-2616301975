@@ -11,30 +11,37 @@ import HelpPage from './pages/HelpPage.jsx';
 import PortfolioPage from './pages/PortfolioPage.jsx';
 import SignInPage from './pages/SignInPage.jsx';
 import TowerMapPage from './pages/TowerMapPage.jsx';
-import { resumeSession, SESSION_KEY, signIn, signOut } from './utils/session.js';
+import { exitSession, PERSONAS, resumeSession, selectPersona, SESSION_KEY } from './utils/session.js';
+
+const ENTRY_ROUTE = '#/personas';
+const LEGACY_ENTRY_ROUTE = '#/sign-in';
 
 /**
  * Resolve only registered workshop paths, never displaying raw route input.
  * Args:
  *   hash: Current workshop route.
- *   onSignOut: Close the workshop and attempt to clear its marker.
+ *   persona: Active local perspective.
+ *   onSelectPersona: Open the selected role's start without resetting this provider.
+ *   onExit: Close the workshop and attempt to clear its marker.
+ *   sessionError: A failed role switch that leaves the current view intact.
  */
-function WorkshopRoutes({ hash, onSignOut }) {
+function WorkshopRoutes({ hash, persona, onSelectPersona, onExit, sessionError }) {
   const main = useRef(null);
   useEffect(() => { main.current?.querySelector('h1')?.focus(); }, [hash]);
-  const portfolio = hash === '' || hash === '#/portfolio' || hash === '#/sign-in';
+  const portfolio = hash === '' || hash === '#/portfolio' || hash === ENTRY_ROUTE || hash === LEGACY_ENTRY_ROUTE;
   const match = /^#\/assessments\/([A-Z0-9-]+)\/(overview|growth)$/.exec(hash);
   const assessment = hash === '#/assessments' || Boolean(match);
-  const actions = hash === '#/actions' || hash === '#/actions/link';
+  const growthQueue = hash === '#/actions/growth';
+  const actions = hash === '#/actions' || hash === '#/actions/link' || hash === '#/actions/critical' || growthQueue;
   const active = portfolio ? 'portfolio' : assessment ? 'assessments' : actions ? 'actions'
     : hash === '#/map' ? 'map' : hash === '#/help' ? 'help' : hash === '#/samples' ? 'samples' : undefined;
   return (
     <div className="min-h-screen bg-background font-sans text-foreground">
-      <GlobalBar active={active} route={hash} onSignOut={onSignOut} />
+      <GlobalBar active={active} route={hash} persona={persona} onSelectPersona={onSelectPersona} onExit={onExit} sessionError={sessionError} />
       <main ref={main} className="mx-auto max-w-6xl px-5 py-8 sm:px-8 sm:py-12">
         {portfolio && <PortfolioPage />}
         {assessment && <AssessmentPage key={match?.[1]} siteId={match?.[1]} tab={match?.[2]} />}
-        {actions && <ActionsPage />}
+        {actions && <ActionsPage key={hash} initialQueue={growthQueue ? 'Growth Opportunities' : undefined} />}
         {active === 'map' && <TowerMapPage />}
         {active === 'help' && <HelpPage />}
         {active === 'samples' && <SampleIntake />}
@@ -50,9 +57,12 @@ function WorkshopRoutes({ hash, onSignOut }) {
   );
 }
 
-WorkshopRoutes.propTypes = { hash: PropTypes.string.isRequired, onSignOut: PropTypes.func.isRequired };
+WorkshopRoutes.propTypes = {
+  hash: PropTypes.string.isRequired, persona: PropTypes.string.isRequired,
+  onSelectPersona: PropTypes.func.isRequired, onExit: PropTypes.func.isRequired, sessionError: PropTypes.string,
+};
 
-/** Gate the workshop before mounting portfolio state; this is not authorization. */
+/** Mount one workshop provider per entered session, independent of the active role. */
 export default function App() {
   const [session, setSession] = useState(() => resumeSession());
   const [hash, setHash] = useState(() => window.location.hash);
@@ -65,7 +75,7 @@ export default function App() {
     function syncSession(event) {
       if (event.newValue !== null || (event.key !== SESSION_KEY && event.key !== null)) return;
       if (event.storageArea !== window.localStorage) return;
-      flushSync(() => setSession({ ok: true, signedIn: false }));
+      flushSync(() => setSession({ ok: true }));
     }
 
     window.addEventListener('hashchange', syncHash);
@@ -77,9 +87,9 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!session.signedIn) replaceRoute('#/sign-in');
-    else if (hash === '#/sign-in') replaceRoute('#/portfolio');
-  }, [hash, session.signedIn]);
+    if (!session.persona) replaceRoute(ENTRY_ROUTE);
+    else if (!hash || hash === ENTRY_ROUTE || hash === LEGACY_ENTRY_ROUTE) replaceRoute(PERSONAS[session.persona].route);
+  }, [hash, session.persona]);
 
   /**
    * Replace the current route without leaving a stale gate entry in history.
@@ -92,31 +102,36 @@ export default function App() {
   }
 
   /**
-   * Open Portfolio only after the fixed pair results in a saved session.
+   * Navigate to a role's start only if the marker can be saved.
    * Args:
-   *   username: Entered username.
-   *   password: Entered password.
-   * Returns:
-   *   Whether the sign-in form can be cleared and dismissed.
+   *   persona: Requested demo perspective.
    */
-  function enter(username, password) {
-    const result = signIn(username, password);
-    if (result.ok) replaceRoute('#/portfolio');
+  function enter(persona) {
+    const result = selectPersona(persona);
+    if (!result.ok) {
+      setSession(current => ({ ...current, code: result.code }));
+      return;
+    }
+    if (session.persona && window.location.hash !== PERSONAS[persona].route) {
+      window.history.pushState(null, '', PERSONAS[persona].route);
+      setHash(PERSONAS[persona].route);
+    } else {
+      replaceRoute(PERSONAS[persona].route);
+    }
     setSession(result);
-    return result.ok;
   }
 
   /** Unmount intake immediately, including when deleting the session marker fails. */
   function exit() {
-    flushSync(() => setSession(signOut()));
+    flushSync(() => setSession(exitSession()));
   }
 
-  if (!session.signedIn) {
-    return <SignInPage error={session.code} pendingClear={session.phase === 'pending-clear'} onSignIn={enter} onRetry={exit} />;
+  if (!session.persona) {
+    return <SignInPage error={session.code} pendingClear={session.phase === 'pending-clear'} onSelect={enter} onRetry={exit} />;
   }
   return (
     <PortfolioProvider>
-      <WorkshopRoutes hash={hash} onSignOut={exit} />
+      <WorkshopRoutes hash={hash} persona={session.persona} onSelectPersona={enter} onExit={exit} sessionError={session.code} />
     </PortfolioProvider>
   );
 }

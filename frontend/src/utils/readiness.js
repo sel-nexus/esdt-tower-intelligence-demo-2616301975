@@ -24,11 +24,12 @@ const answers = {
 };
 
 /** Return the first applicable rule, never using a score to bypass a constraint. */
-function decide({ blocked, materialGap, upgradeFit, unverifiedPower, currentFit, score }, bands) {
+function decide({ blocked, materialGap, upgradeFit, unverifiedPower, unverifiedCabinet, currentFit, score }, bands) {
   if (blocked) return 'HARD_BLOCKER';
   if (materialGap) return 'MATERIAL_GAP';
   if (upgradeFit) return 'UPGRADE_FIT';
   if (unverifiedPower) return 'UNVERIFIED_POWER';
+  if (unverifiedCabinet) return 'UPGRADE_UNESTABLISHED';
   if (currentFit && score !== null && score >= bands.yes) return 'CURRENT_FIT';
   if (score !== null && score >= bands.upgrade) return 'UPGRADE_UNESTABLISHED';
   if (score === null || score >= bands.information) return 'BAND_INFORMATION';
@@ -50,7 +51,7 @@ const deficit = (available, required) => available === null || required === null
 /** Check a specific proposal's capacity and future fit as distinct observations. */
 function inspectUpgrade(snapshot, catalog, kind, required, evidence) {
   const candidate = catalog.value?.find(item => item.kind === kind);
-  if (!candidate) return { potential: false, confirmed: false, infeasible: false };
+  if (!candidate) return { confirmed: false, absent: catalog.usable, infeasible: false };
   const label = `${kind === 'power' ? 'Power' : 'Cabinet'} upgrade`;
   const capacity = resolveEvidence(snapshot, { value: candidate.afterCapacity, evidenceId: candidate.evidenceId }, `upgrades.${kind}.afterCapacity`, 'required');
   const futureFit = resolveEvidence(snapshot, { value: candidate.feasibility, evidenceId: candidate.futureFitEvidenceId }, `upgrades.${kind}.futureFit`, 'required');
@@ -58,15 +59,15 @@ function inspectUpgrade(snapshot, catalog, kind, required, evidence) {
   const knownCapacity = catalog.usable && capacity.usable;
   const infeasible = (catalog.usable && futureFit.usable && candidate.feasibility === 'infeasible')
     || (knownCapacity && candidate.afterCapacity < required);
-  const potential = knownCapacity && !infeasible;
   return {
-    potential, infeasible, confirmed: potential && futureFit.usable && candidate.feasibility === 'confirmed',
+    infeasible, confirmed: knownCapacity && !infeasible && futureFit.usable && candidate.feasibility === 'confirmed',
+    explicitlyUnverified: catalog.usable && futureFit.usable && candidate.feasibility === 'unverified',
     afterCapacity: knownCapacity ? candidate.afterCapacity : null,
   };
 }
 
 /** Build a next step specific to the deciding rule and the named constraints. */
-function nextStep(rule, { blockers, gaps, remedies, constraints }) {
+function nextStep(rule, { blockers, gaps, remedies, constraints, unverifiedCabinet }) {
   switch (rule) {
     case 'HARD_BLOCKER': return `Do not pursue an additional tenant unless these blockers are resolved: ${blockers.join('; ')}.`;
     case 'MATERIAL_GAP': return `Collect current, complete evidence for: ${gaps.map(gap => gap.label).join(', ')}.`;
@@ -74,8 +75,10 @@ function nextStep(rule, { blockers, gaps, remedies, constraints }) {
     case 'UNVERIFIED_POWER': return 'Confirm a feasible power upgrade and document its after-capacity and future fit.';
     case 'CURRENT_FIT': return 'Validate the proposed additional tenant against the current site configuration.';
     case 'BAND_NO': return 'Do not pursue an additional tenant under the current readiness assumptions.';
-    default: return constraints.length ? `Resolve the outstanding constraints before reconsidering fit: ${constraints.join('; ')}.`
-      : 'Verify the site and tenant requirements before reconsidering fit.';
+    default:
+      if (unverifiedCabinet) return 'Collect current evidence to document that the proposed cabinet upgrade is feasible and meets the tenant’s cabinet demand.';
+      return constraints.length ? `Resolve the outstanding constraints before reconsidering fit: ${constraints.join('; ')}.`
+        : 'Verify the site and tenant requirements before reconsidering fit.';
   }
 }
 
@@ -142,6 +145,7 @@ export function assessReadiness(snapshot, site, findings = []) {
   if (spaceDeficit > 0) requiredRemedies.push(['cabinet', requiredCabinet]);
   const remedies = [];
   const afterCapacities = {};
+  let unverifiedCabinet = false;
   if (requiredRemedies.length) {
     const catalog = resolveEvidence(snapshot, site.upgrades, 'upgrades', 'required');
     evidence.push({ ...catalog, value: catalog.value?.length ?? null, label: 'Upgrade options' });
@@ -149,9 +153,12 @@ export function assessReadiness(snapshot, site, findings = []) {
       const result = inspectUpgrade(snapshot, catalog, kind, demand, evidence);
       if (result.afterCapacity != null) afterCapacities[kind] = result.afterCapacity;
       if (result.confirmed) remedies.push(kind);
-      else if (kind === 'cabinet' && !result.potential) blockers.push('No evidenced cabinet remedy meets demand');
+      else if (kind === 'cabinet' && (result.absent || result.infeasible)) blockers.push('Current evidence rules out a cabinet remedy that meets demand');
       else if (result.infeasible) blockers.push('Power upgrade is infeasible or does not meet demand');
-      else constraints.push(`${kind === 'power' ? 'Power' : 'Cabinet'} upgrade future fit is unverified`);
+      else {
+        if (kind === 'cabinet') unverifiedCabinet = result.explicitlyUnverified;
+        constraints.push(`${kind === 'power' ? 'Power upgrade future fit' : 'Cabinet upgrade fit'} is unverified`);
+      }
     }
   }
 
@@ -162,7 +169,7 @@ export function assessReadiness(snapshot, site, findings = []) {
   const upgradeFit = baseFit && requiredRemedies.length > 0 && remedies.length === requiredRemedies.length
     && spaceDeficit !== null && powerDeficit !== null;
   const decidingRule = decide({ blocked: blockers.length > 0, materialGap: materialGaps.length > 0, upgradeFit,
-    unverifiedPower: powerDeficit > 0 && !remedies.includes('power'), currentFit, score }, config.readinessBands);
+    unverifiedPower: powerDeficit > 0 && !remedies.includes('power'), unverifiedCabinet, currentFit, score }, config.readinessBands);
   const allConstraints = [...blockers, ...constraints];
   const requiredValidation = ['Certified structural and site validation before implementation'];
   if (findings.some(finding => finding.kind === 'inspection' && finding.dueDate < snapshot.referenceDate)) {
@@ -175,7 +182,8 @@ export function assessReadiness(snapshot, site, findings = []) {
       weights: { ...config.readinessWeights } },
     confidence: materialGaps.length ? null : Math.min(...evidence.filter(row => row.materiality === 'required').map(row => row.confidence)),
     evidence, gaps, constraints: allConstraints, remedies,
-    permits: known('permits'), recommendation: nextStep(decidingRule, { blockers, gaps: materialGaps, remedies, constraints: allConstraints }),
+    permits: known('permits'),
+    recommendation: nextStep(decidingRule, { blockers, gaps: materialGaps, remedies, constraints: allConstraints, unverifiedCabinet }),
     requiredValidation, disclaimer: 'Indicative assessment only',
   });
 }

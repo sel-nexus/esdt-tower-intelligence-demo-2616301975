@@ -1,7 +1,10 @@
 /** Derive deterministic action queues and validate simulated workflow changes. */
 import { freezeRecord } from './fixtures.js';
 
-export const QUEUES = Object.freeze(['Critical Sites', 'Inspection Due', 'High Operating Cost', 'Growth Opportunities', 'Upgrade Required']);
+export const QUEUES = Object.freeze([
+  'Critical Sites', 'Inspection Due', 'High Operating Cost', 'Growth Opportunities', 'Upgrade Required',
+  'Missing Information', 'Power Upgrades',
+]);
 export const CATEGORIES = Object.freeze(['Grow', 'Improve', 'Protect']);
 export const STATUSES = Object.freeze(['Open', 'In Progress', 'Completed']);
 const upgrades = ['power-upgrade', 'cabinet-upgrade'];
@@ -76,6 +79,8 @@ export function selectQueue(actions, view) {
     case 'Critical Sites': return actions.filter(action => action.critical);
     case 'Inspection Due': return actions.filter(action => action.kind === 'inspection');
     case 'High Operating Cost': return actions.filter(action => action.kind === 'energy');
+    case 'Missing Information': return actions.filter(action => action.kind === 'missing-info');
+    case 'Power Upgrades': return actions.filter(action => action.kind === 'power-upgrade');
     case 'Growth Opportunities': return actions.filter(isOpportunity).sort(byOpportunity);
     case 'Upgrade Required': return actions.filter(action => upgrades.includes(action.kind)).sort(byOpportunity);
     default: return [];

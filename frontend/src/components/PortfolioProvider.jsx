@@ -5,7 +5,7 @@ import { loadBaseline } from '../utils/fixtures.js';
 import { rankActions } from '../utils/actions.js';
 import { listAlerts } from '../utils/alerts.js';
 import { inspectDiagnostics } from '../utils/diagnostics.js';
-import { reduceDiscovery, selectDiscovery, selectKpis, selectShortlists } from '../utils/discover.js';
+import { reduceDiscovery, selectDiscovery, selectKpis, selectPortfolioScope, selectShortlists } from '../utils/discover.js';
 import { downloadText } from '../utils/export.js';
 import { createPortfolioState, reduce } from '../utils/portfolioReducer.js';
 import { summarizeBaseline } from '../utils/scenario.js';
@@ -51,8 +51,10 @@ export function PortfolioProvider({ children, fixtureResult, now = nowUtc, downl
   const actions = useMemo(() => rankActions(state.snapshot, assessments, state.workflow), [state.snapshot, assessments, state.workflow]);
   const diagnostics = useMemo(() => inspectDiagnostics(state.snapshot, state.audit), [state.snapshot, state.audit]);
   const { snapshot } = state;
-  const kpis = useMemo(() => snapshot ? selectKpis(snapshot, assessments, alerts) : null, [snapshot, assessments, alerts]);
-  const shortlists = useMemo(() => snapshot ? selectShortlists(snapshot, assessments, actions) : [], [snapshot, assessments, actions]);
+  const { query, filters } = state.discovery;
+  const scope = useMemo(() => snapshot && selectPortfolioScope(snapshot, assessments, { query, filters }), [snapshot, assessments, query, filters]);
+  const kpis = useMemo(() => snapshot ? selectKpis(snapshot, assessments, alerts, scope) : null, [snapshot, assessments, alerts, scope]);
+  const shortlists = useMemo(() => snapshot ? selectShortlists(snapshot, assessments, actions, scope) : [], [snapshot, assessments, actions, scope]);
   const discovery = useMemo(() => selectDiscovery(snapshot, assessments, state.discovery, actions, kpis),
     [snapshot, assessments, state.discovery, actions, kpis]);
   const value = useMemo(() => ({ state, snapshot, summary, assessments, alerts, actions, diagnostics, send, downloadExport, kpis, shortlists, discovery }),

@@ -182,17 +182,24 @@ describe('scenario transactions', () => {
 
   it('resets controls, workflow and discovery, then treats a second reset as a no-op', () => {
     const initial = createPortfolioState(fixture);
-    const setting = control(initial, { kind: 'settings', patch: { powerToleranceKw: 3 } });
+    const timestamp = '2025-03-01T00:00:00.000Z';
+    const setting = control(initial, { kind: 'settings', patch: { powerToleranceKw: 3 }, timestamp });
+    expect(setting.audit.events.map(event => event.type)).toEqual(['SETTINGS_CHANGED']);
     const switched = control(setting, { kind: 'switch', scenarioId: 'energy-pressure' });
     const masked = control(switched, { kind: 'mask', siteId: nyc, attribute: path, enabled: true });
     const dirty = { ...masked, discovery: { query: 'nyc', filters: { health: ['Good'] }, signal: {}, selectedSiteId: nyc }, workflow: { alerts: { baseline: { a: 'Closed' } }, actions: {}, categories: {} } };
-    const reset = control(dirty, { kind: 'reset' });
+    const reset = control(dirty, { kind: 'reset', timestamp });
     expect(reset.controls).toEqual(createBaselineControls());
     expect(reset.discovery).toEqual(initial.discovery);
     expect(reset.workflow).toEqual(initial.workflow);
     expect(reset.snapshot).toMatchObject({ scenarioId: 'baseline', config: { powerToleranceKw: 5 }, snapshotRevision: 5, settingsVersion: 3 });
     expect(reset.snapshot.sitesById.get(nyc)).toBe(initial.snapshot.sitesById.get(nyc));
-    expect(control(reset, { kind: 'reset' }).result.code).toBe('NO_CHANGE');
+    expect(reset.audit.events).toEqual([
+      ...setting.audit.events, expect.objectContaining({ type: 'PORTFOLIO_RESET' }),
+    ]);
+    const noOp = control(reset, { kind: 'reset', timestamp });
+    expect(noOp.result.code).toBe('NO_CHANGE');
+    expect(noOp.audit).toBe(reset.audit);
   });
 });
 
@@ -219,6 +226,39 @@ describe('facilitator controls', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Snapshot revision 2 · Settings version 2 · No effective change.');
     await user.click(screen.getByRole('button', { name: 'Reset baseline' }));
     expect(tolerance).toHaveValue(5);
+  });
+
+  it.each(['Reset workshop', 'Reset baseline'])('clears local drafts on repeated no-op %s clicks without leaving Portfolio', async resetName => {
+    const session = '{"v":1,"signedIn":true}';
+    window.localStorage.setItem('esdt.demo.session.v1', session);
+    window.history.replaceState(null, '', '#/portfolio');
+    const user = userEvent.setup();
+    render(createElement(App));
+    const tolerance = screen.getByRole('spinbutton', { name: /proposed power tolerance/i });
+    const tower = screen.getByLabelText('Tower', { exact: true });
+    const evidence = screen.getByLabelText('Evidence field');
+    const reset = screen.getByRole('button', { name: resetName });
+
+    for (const proposed of [3, 7]) {
+      await user.clear(tolerance);
+      await user.type(tolerance, String(proposed));
+      await user.selectOptions(tower, 'DAL-20451');
+      await user.selectOptions(evidence, 'structure.status');
+      expect(tolerance).toHaveValue(proposed);
+      expect(tower).toHaveValue('DAL-20451');
+      expect(evidence).toHaveValue('structure.status');
+      expect(screen.getByText('Effective tolerance: 5 kW')).toBeVisible();
+
+      await user.click(reset);
+
+      expect(window.location.hash).toBe('#/portfolio');
+      expect(screen.getByRole('spinbutton', { name: /proposed power tolerance/i })).toBe(tolerance);
+      expect(tolerance).toHaveValue(5);
+      expect(tower).toHaveValue(nyc);
+      expect(evidence).toHaveValue(path);
+      expect(screen.getByRole('status')).toHaveTextContent('Snapshot revision 1 · Settings version 1 · No effective change.');
+    }
+    expect(window.localStorage.getItem('esdt.demo.session.v1')).toBe(session);
   });
 
   it('shows the fixture failure instead of publishing partial data', () => {

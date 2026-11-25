@@ -3,7 +3,6 @@ import { expect, test } from '@playwright/test';
 
 const sessionKey = 'esdt.demo.session.v1';
 const samplesKey = 'esdt.demo.samples.v1';
-const credentialsKey = 'esdt.demo.credentials.v1';
 const text = '<strong>Synthetic workshop only</strong>\n\tNYC-10234: illustrative practice note.';
 
 /** Attach browser error observers before navigation. */
@@ -14,12 +13,16 @@ function browserErrors(page) {
   return errors;
 }
 
-/** Enter the public demo pair using the actual form. */
+/** Enter through the role picker and observe the initial focus handoff. */
 async function enter(page) {
-  await page.getByLabel('Username').fill('tower-demo');
-  await page.getByLabel('Password').fill('synthetic-only');
-  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await page.getByRole('button', { name: 'Portfolio Manager', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Portfolio scenario' })).toBeFocused();
+}
+
+/** Close the workshop through its role disclosure. */
+async function exit(page) {
+  await page.locator('summary').filter({ hasText: 'Demo role' }).click();
+  await page.getByRole('button', { name: 'Exit workshop' }).click();
 }
 
 /** Capture decision outputs that must remain identical across intake changes. */
@@ -39,9 +42,9 @@ async function fingerprint(page) {
 test('enters from signed out, keeps literal samples across reset and reload, and signs out another tab', async ({ page, context }) => {
   const errors = browserErrors(page);
   await page.goto('/#/samples');
-  const gate = page.getByRole('heading', { name: 'Sign in to Tower Intelligence' });
+  const gate = page.getByRole('heading', { name: 'Choose a demo role' });
   await expect(gate).toBeFocused();
-  await expect(page).toHaveURL(/#\/sign-in$/);
+  await expect(page).toHaveURL(/#\/personas$/);
   await expect(page.getByRole('navigation', { name: 'Workshop' })).toHaveCount(0);
   const requests = [];
   const capture = request => {
@@ -53,12 +56,7 @@ test('enters from signed out, keeps literal samples across reset and reload, and
   };
   page.on('request', capture);
 
-  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-  await expect(page.getByRole('alert')).toContainText('Enter the exact demo username and password');
-  await page.getByLabel('Username').fill('tower-demo');
-  await page.getByLabel('Password').fill('synthetic-only ');
-  await page.getByLabel('Password').press('Enter');
-  await expect(gate).toBeVisible();
+  await expect(page.getByLabel('Password')).toHaveCount(0);
   expect(await page.evaluate(() => Object.keys(localStorage))).toEqual([]);
 
   await enter(page);
@@ -121,15 +119,15 @@ test('enters from signed out, keeps literal samples across reset and reload, and
   await page.reload();
   await expect(retained.getByRole('heading', { name: 'practice.TXT' })).toBeVisible();
   expect(await retained.locator('pre').textContent()).toBe(text);
-  expect(await page.evaluate(() => Object.keys(localStorage).sort())).toEqual([credentialsKey, samplesKey, sessionKey].sort());
+  expect(await page.evaluate(() => Object.keys(localStorage).sort())).toEqual([samplesKey, sessionKey].sort());
   const tab = await context.newPage();
   const tabErrors = browserErrors(tab);
   await tab.goto('/#/samples');
   await expect(tab.getByRole('heading', { name: 'Synthetic samples' })).toBeVisible();
-  await page.getByRole('button', { name: 'Sign out' }).click();
+  await exit(page);
   await expect(gate).toBeVisible();
-  await expect(tab.getByRole('heading', { name: 'Sign in to Tower Intelligence' })).toBeVisible();
-  expect(await page.evaluate(() => Object.keys(localStorage).sort())).toEqual([credentialsKey, samplesKey].sort());
+  await expect(tab.getByRole('heading', { name: 'Choose a demo role' })).toBeVisible();
+  expect(await page.evaluate(() => Object.keys(localStorage).sort())).toEqual([samplesKey]);
   await enter(page);
   await page.getByRole('link', { name: 'Samples', exact: true }).click();
   await retained.getByRole('button', { name: 'Remove sample practice.TXT' }).click();
@@ -171,12 +169,12 @@ test('retains a successful sample when a later save fails and retries a blocked 
   await expect(page.getByRole('alert')).toContainText('Previously retained samples are unchanged');
   await expect(page.getByRole('heading', { name: 'second.txt' })).toHaveCount(0);
   expect(await page.evaluate(key => localStorage.getItem(key), samplesKey)).toBe(stored);
-  await page.getByRole('button', { name: 'Sign out' }).click();
+  await exit(page);
   await expect(page.getByRole('alert')).toContainText('Reloading may restore it');
   await expect(page.getByRole('navigation', { name: 'Workshop' })).toHaveCount(0);
   expect(await page.evaluate(key => localStorage.getItem(key), sessionKey)).not.toBeNull();
-  await page.getByRole('button', { name: 'Retry Sign Out' }).click();
-  await expect(page.getByRole('heading', { name: 'Sign in to Tower Intelligence' })).toBeFocused();
+  await page.getByRole('button', { name: 'Retry exit' }).click();
+  await expect(page.getByRole('heading', { name: 'Choose a demo role' })).toBeFocused();
   expect(await page.evaluate(key => localStorage.getItem(key), sessionKey)).toBeNull();
   expect(await page.evaluate(key => localStorage.getItem(key), samplesKey)).toBe(stored);
   expect(errors).toEqual([]);

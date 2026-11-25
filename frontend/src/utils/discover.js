@@ -11,6 +11,15 @@ const types = ['lattice', 'monopole', 'guyed', 'rooftop'];
 const tenantRanges = ['0–1', '2–3', '4+', unknown];
 const inspectionStates = ['Due', 'Not due', unknown];
 const costStates = ['High cost', 'Within thresholds', unknown];
+const opportunityStates = ['Eligible', 'Not eligible', unknown];
+
+export const FACET_LABELS = {
+  health: 'Health', type: 'Tower type', geography: 'Geography · state', tenants: 'Active tenant range',
+  inspection: 'Inspection timing', readiness: 'Readiness', opportunity: 'Growth opportunity', cost: 'Operating or energy cost',
+};
+
+/** Identify the existing growth cohort without imposing a priority cutoff. */
+const isOpportunity = answer => answer === 'Yes' || answer === 'Yes after an upgrade';
 
 /** Trim the ends and compare case-insensitively, without treating input as markup. */
 const normalize = text => typeof text === 'string' ? text.trim().toLowerCase() : '';
@@ -30,6 +39,7 @@ export function facetOptions(snapshot) {
     tenants: tenantRanges,
     inspection: inspectionStates,
     readiness: READINESS_BANDS,
+    opportunity: opportunityStates,
     cost: costStates,
   };
 }
@@ -38,11 +48,14 @@ export function facetOptions(snapshot) {
 function facts(site, assessment, config) {
   const { activeTenants = null, operatingCost = null, energyCost = null } = assessment?.commercial ?? {};
   const due = assessment?.inspection?.due;
+  const readiness = assessment?.readiness?.answer ?? unknown;
   const cost = operatingCost > config.highOperatingCostCents || energyCost > config.highEnergyCostCents
     ? costStates[0] : operatingCost === null || energyCost === null ? unknown : costStates[1];
   return {
-    health: assessment?.health.band ?? unknown,
-    readiness: assessment?.readiness.answer ?? unknown,
+    health: assessment?.health?.band ?? unknown,
+    readiness,
+    opportunity: readiness === unknown || readiness === 'Need More Information' ? unknown
+      : opportunityStates[isOpportunity(readiness) ? 0 : 1],
     type: site.type,
     geography: site.state,
     tenants: !Number.isInteger(activeTenants) || activeTenants < 0 ? unknown : tenantRanges[activeTenants >= 4 ? 2 : activeTenants >= 2 ? 1 : 0],
@@ -59,6 +72,20 @@ function acceptedFilters(snapshot, filters) {
   }));
 }
 
+/** Test the shared discovery query and facet intersection. */
+function matchesScope(site, categories, query, filters) {
+  return matchesQuery(site, query) && Object.entries(filters).every(([key, values]) => values.includes(categories[key]));
+}
+
+/** Select the active portfolio cohort, excluding the map-only contributor signal. */
+export function selectPortfolioScope(snapshot, index, { query, filters } = {}) {
+  const accepted = acceptedFilters(snapshot, filters);
+  return new Set([...snapshot.sitesById.values()]
+    .filter(site => site.lifecycleStatus === 'active'
+      && matchesScope(site, facts(site, index.get(site.siteId), snapshot.config), query, accepted))
+    .map(site => site.siteId));
+}
+
 /** Bind a drill-in intent to the snapshot whose numbers the user saw. */
 export function signalRef(snapshot, key) {
   const { scenarioId, settingsVersion, snapshotRevision } = snapshot;
@@ -71,10 +98,8 @@ function currentSignal(snapshot, signal) {
 }
 
 /** Compute active-site measures and carry the exact membership behind each tile. */
-export function selectKpis(snapshot, index, alerts) {
-  const active = [...snapshot.sitesById.values()].filter(site => site.lifecycleStatus === 'active');
-  const ids = active.map(site => site.siteId);
-  const activeIds = new Set(ids);
+export function selectKpis(snapshot, index, alerts, activeIds = selectPortfolioScope(snapshot, index)) {
+  const ids = [...activeIds];
   const tiles = {};
   /** Publish a number and its contributor IDs together, preserving unavailable membership. */
   function add(key, label, value, siteIds, coverage) {
@@ -89,11 +114,12 @@ export function selectKpis(snapshot, index, alerts) {
   const tenants = additive('activeTenants');
   const revenue = additive('revenue');
   const members = (group, value) => ids.filter(id => (group(index.get(id)) ?? unknown) === value);
-  const health = band => members(assessment => assessment?.health.band, band);
-  const readiness = answer => members(assessment => assessment?.readiness.answer, answer);
+  const health = band => members(assessment => assessment?.health?.band, band);
+  const readiness = answer => members(assessment => assessment?.readiness?.answer, answer);
   const good = health('Good');
-  const growthSet = new Set([...readiness('Yes'), ...readiness('Yes after an upgrade')]);
-  const growth = ids.filter(id => growthSet.has(id));
+  const knownHealth = ids.length - health(unknown).length;
+  const healthComplete = ids.length > 0 && knownHealth === ids.length;
+  const growth = ids.filter(id => isOpportunity(index.get(id)?.readiness?.answer));
   const critical = health('Critical');
   const open = alerts.filter(alert => alert.status === 'Open' && activeIds.has(alert.siteId));
   const openIds = new Set(open.map(alert => alert.siteId));
@@ -101,7 +127,8 @@ export function selectKpis(snapshot, index, alerts) {
   add('tenants', 'Active tenants', tenants.value, tenants.value === null ? null : ids, tenants.coverage);
   add('average', 'Average tenancy', tenants.value === null || !ids.length ? null : tenants.value / ids.length, tenants.value === null || !ids.length ? null : ids, tenants.coverage);
   add('revenue', 'Indicative annual revenue', revenue.value, revenue.value === null ? null : ids, revenue.coverage);
-  add('healthy', 'Healthy sites', ids.length ? 100 * good.length / ids.length : null, ids.length ? good : null);
+  add('healthy', 'Healthy sites', healthComplete ? 100 * good.length / ids.length : null,
+    healthComplete ? good : null, { known: knownHealth, total: ids.length });
   add('critical', 'Critical sites', critical.length, critical);
   add('opportunities', 'Growth opportunities', growth.length, growth);
   add('alerts', 'Open alerts', open.length, ids.filter(id => openIds.has(id)));
@@ -115,9 +142,9 @@ export function selectKpis(snapshot, index, alerts) {
 }
 
 /** Use the queue orders, deduplicating eligible sites before taking at most five. */
-export function selectShortlists(snapshot, index, actions) {
-  const active = new Set([...snapshot.sitesById.values()].filter(site => site.lifecycleStatus === 'active').map(site => site.siteId));
-  return QUEUES.map(view => {
+export function selectShortlists(snapshot, index, actions, active = selectPortfolioScope(snapshot, index)) {
+  // Focused operational queues live in Actions without duplicating the portfolio shortlists.
+  return QUEUES.filter(view => view !== 'Missing Information' && view !== 'Power Upgrades').map(view => {
     const isGrowth = view === 'Growth Opportunities' || view === 'Upgrade Required';
     const rows = selectQueue(actions, view).filter(action => active.has(action.siteId)
       && (view !== 'Critical Sites' || action === nextOperationalAction(actions, action.siteId)));
@@ -126,7 +153,7 @@ export function selectShortlists(snapshot, index, actions) {
       if ((!isGrowth || Number.isFinite(row.priority)) && !rankable.has(row.siteId)) rankable.set(row.siteId, row);
     }
     const incomplete = isGrowth && (rows.some(row => !rankable.has(row.siteId)) || [...active].some(id => {
-      const answer = index.get(id)?.readiness.answer;
+      const answer = index.get(id)?.readiness?.answer;
       return !answer || answer === unknown || answer === 'Need More Information'
         || ((answer === 'Yes after an upgrade' || (view === 'Growth Opportunities' && answer === 'Yes')) && !rankable.has(id));
     }));
@@ -165,7 +192,7 @@ export function selectDiscovery(snapshot, index, intent, actions, tiles, geometr
   const { query, signal, selectedSiteId } = intent;
   const filters = acceptedFilters(snapshot, intent.filters);
   const activeSignal = currentSignal(snapshot, signal) && Object.hasOwn(tiles, signal.key) ? tiles[signal.key] : null;
-  const signalIds = activeSignal?.siteIds ? new Set(activeSignal.siteIds) : null;
+  const signalIds = activeSignal ? new Set(activeSignal.siteIds ?? []) : null;
   const projection = createMapProjection(geometry);
   const sites = [...snapshot.sitesById.values()].sort((a, b) => a.siteId.localeCompare(b.siteId));
   const searchIds = normalize(query) ? sites.filter(site => matchesQuery(site, query)).map(site => site.siteId) : [];
@@ -173,15 +200,14 @@ export function selectDiscovery(snapshot, index, intent, actions, tiles, geometr
     const { siteId, market } = site;
     const assessment = index.get(siteId);
     const categories = facts(site, assessment, snapshot.config);
-    if (!matchesQuery(site, query) || (signalIds && !signalIds.has(siteId))
-      || !Object.entries(filters).every(([key, values]) => values.includes(categories[key]))) return [];
+    if ((signalIds && !signalIds.has(siteId)) || !matchesScope(site, categories, query, filters)) return [];
     return [{ siteId, market, city: site.city, state: site.state, health: categories.health,
       activeTenants: assessment?.commercial.activeTenants ?? null, utilization: formatUtilization(assessment?.commercial),
       nextStep: nextOperationalAction(actions, siteId)?.nextStep ?? assessment?.recommendation ?? unknown,
       point: projection?.point(site.longitude?.value, site.latitude?.value) ?? null }];
   });
   const siteIds = rows.map(row => row.siteId);
-  return { ok: true, rows, siteIds, searchIds, signal: activeSignal?.siteIds ? activeSignal : null,
+  return { ok: true, rows, siteIds, searchIds, signal: activeSignal,
     polygon: projection?.polygon ?? null, markerIds: rows.filter(row => row.point).map(row => row.siteId),
     selectedSiteId: siteIds.includes(selectedSiteId) ? selectedSiteId : null };
 }
@@ -196,7 +222,7 @@ export function selectDiscovery(snapshot, index, intent, actions, tiles, geometr
  *   One atomic state, without recomputing assessments for discovery changes.
  */
 export function reduceDiscovery(reduce, state, command) {
-  const discoveryKinds = ['query', 'facet', 'signal', 'clearDiscovery', 'selectTower'];
+  const discoveryKinds = ['query', 'facet', 'setFacet', 'signal', 'clearDiscovery', 'selectTower'];
   let next;
   if (!discoveryKinds.includes(command?.kind)) {
     next = reduce(state, command);
@@ -213,19 +239,23 @@ export function reduceDiscovery(reduce, state, command) {
         if (typeof command.query !== 'string') return reject('INVALID_QUERY');
         pending.query = command.query;
         break;
-      case 'facet': {
+      case 'facet':
+      case 'setFacet': {
         const options = facetOptions(snapshot);
         const { key, value } = command;
-        if (!Object.hasOwn(options, key) || !options[key].includes(value)) return reject('INVALID_FILTER');
+        const replace = command.kind === 'setFacet';
+        if (!Object.hasOwn(options, key) || !(options[key].includes(value) || (replace && value === ''))) return reject('INVALID_FILTER');
         const current = discovery.filters[key] ?? [];
-        pending.filters = { ...discovery.filters, [key]: current.includes(value) ? current.filter(item => item !== value) : [...current, value] };
+        const values = replace ? (value ? [value] : []) : current.includes(value) ? current.filter(item => item !== value) : [...current, value];
+        pending.filters = { ...discovery.filters, [key]: values };
         if (!pending.filters[key].length) delete pending.filters[key];
         break;
       }
       case 'signal': {
         if (command.ref !== null) {
           if (!currentSignal(snapshot, command.ref)) return reject('STALE_VIEW');
-          const tiles = selectKpis(snapshot, state.assessments, listAlerts(snapshot, state.workflow.alerts));
+          const tiles = selectKpis(snapshot, state.assessments, listAlerts(snapshot, state.workflow.alerts),
+            selectPortfolioScope(snapshot, state.assessments, discovery));
           if (!Object.hasOwn(tiles, command.ref.key) || tiles[command.ref.key].siteIds === null) return reject('SIGNAL_UNAVAILABLE');
           pending.signal = tiles[command.ref.key].ref;
         } else pending.signal = null;
@@ -251,11 +281,11 @@ export function reduceDiscovery(reduce, state, command) {
   }
   if (discovery.selectedSiteId) {
     const site = snapshot.sitesById.get(discovery.selectedSiteId);
-    const tiles = discovery.signal && selectKpis(snapshot, assessments, listAlerts(snapshot, next.workflow.alerts));
+    const tiles = discovery.signal && selectKpis(snapshot, assessments, listAlerts(snapshot, next.workflow.alerts),
+      selectPortfolioScope(snapshot, assessments, discovery));
     const category = site && facts(site, assessments.get(site.siteId), snapshot.config);
-    if (!site || !matchesQuery(site, discovery.query)
-      || !Object.entries(acceptedFilters(snapshot, discovery.filters)).every(([key, values]) => values.includes(category[key]))
-      || (tiles && !tiles[discovery.signal.key].siteIds?.includes(site.siteId))) {
+    if (!site || !matchesScope(site, category, discovery.query, acceptedFilters(snapshot, discovery.filters))
+      || (tiles && !tiles[discovery.signal.key]?.siteIds?.includes(site.siteId))) {
       discovery = { ...discovery, selectedSiteId: null,
         notice: !site ? 'The selected tower is no longer in this scenario.' : discovery.notice };
     }

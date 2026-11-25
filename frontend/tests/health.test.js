@@ -7,6 +7,7 @@ import { createElement } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 import App from '../src/App.jsx';
 import { PortfolioProvider, usePortfolio } from '../src/components/PortfolioProvider.jsx';
+import AssessmentPage from '../src/pages/AssessmentPage.jsx';
 import { listAlerts, transitionAlert } from '../src/utils/alerts.js';
 import { loadBaseline } from '../src/utils/fixtures.js';
 import { assessHealth, deriveAssessments, healthBand, inspectionTiming, resolveEvidence } from '../src/utils/health.js';
@@ -167,6 +168,23 @@ describe('alert progress', () => {
 });
 
 describe('assessment navigation', () => {
+  it('keeps missing tenant power demand in shared evidence without flagging health', async () => {
+    const siteId = 'DAL-20451';
+    const input = structuredClone(fixture);
+    const site = input.value.sites.find(item => item.siteId === siteId);
+    site.power.requiredKw = { ...site.power.requiredKw, value: null, missingReason: 'not-provided' };
+    const user = userEvent.setup();
+    render(createElement(PortfolioProvider, { fixtureResult: input }, createElement(AssessmentPage, { siteId })));
+
+    const health = within(screen.getByRole('region', { name: 'Tower health' }));
+    expect(health.getByText('Good')).toBeVisible();
+    expect(health.queryByText(/Required health evidence needs review/)).not.toBeInTheDocument();
+    await user.click(screen.getByText('Evidence and sources'));
+    const demand = within(screen.getByText('Required power').closest('li'));
+    expect(demand.getByText('power.requiredKw · power · required')).toBeVisible();
+    expect(demand.getByText('Missing · not provided')).toBeVisible();
+  });
+
   it('opens a linked assessment with heading focus, then acknowledges and closes without changing health', async () => {
     window.localStorage.setItem('esdt.demo.session.v1', '{"v":1,"signedIn":true}');
     const user = userEvent.setup();
@@ -193,6 +211,30 @@ describe('assessment navigation', () => {
     expect(screen.getAllByText('Synthetic Inspection Register · Synthetic')[0]).toBeVisible();
     await user.click(screen.getByRole('link', { name: 'Portfolio' }));
     expect(await screen.findByRole('heading', { name: 'Portfolio scenario' })).toBeVisible();
+  });
+
+  it('shows limits on the LAX health assessment and separates inspection provenance from owner economics', async () => {
+    window.localStorage.setItem('esdt.demo.session.v1', '{"v":1,"signedIn":true}');
+    window.history.replaceState(null, '', `/#/assessments/${lax}/overview`);
+    const user = userEvent.setup();
+    render(createElement(App));
+    const health = within(screen.getByRole('region', { name: 'Tower health' }));
+    expect(health.getByText('Indicative assessment only')).toBeVisible();
+    expect(health.getByText(/Required health evidence needs review/)).toBeVisible();
+    expect(health.getByText('Workshop recommendation only. No work order is issued.')).toBeVisible();
+    const commercial = within(screen.getByRole('region', { name: 'Commercial snapshot' }));
+    expect(commercial.getByText('Tower Owner data')).toBeVisible();
+    expect(commercial.getByText(/not an approved business case/)).toBeVisible();
+    await user.click(screen.getByText('Evidence and sources'));
+    const technical = within(screen.getByRole('heading', { name: 'ESDT-Aligned' }).closest('section'));
+    const inspection = within(technical.getByText('histories.inspection').closest('li'));
+    expect(inspection.getByText('Synthetic Inspection Register · Synthetic')).toBeVisible();
+    expect(inspection.getByText('Observed: 2023-12-15 · Updated: 2025-02-20')).toBeVisible();
+    expect(inspection.getByText('Completeness: partial · Confidence: 55%')).toBeVisible();
+    expect(inspection.getByText('Stale · Low Confidence · Incomplete')).toBeVisible();
+    const owner = within(screen.getByRole('heading', { name: 'Tower Owner' }).closest('section'));
+    expect(owner.getByText('commercial.revenue').closest('li')).toHaveTextContent('Synthetic Lease and Cost Ledger');
+    expect(owner.queryByText('histories.inspection')).not.toBeInTheDocument();
   });
 
   it('recovers from an unknown site without displaying an invalid assessment', async () => {

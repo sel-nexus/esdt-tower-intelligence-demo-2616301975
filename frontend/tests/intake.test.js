@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
-/** Verify the local demo gate, exact text validation and isolated storage recovery. */
+/** Verify the local workshop entry, exact text validation and isolated storage recovery. */
 import '@testing-library/jest-dom/vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { createElement } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import App from '../src/App.jsx';
-import { CREDENTIALS_KEY, DEMO_CREDENTIALS, SESSION_KEY, resumeSession, signIn, signOut } from '../src/utils/session.js';
+import { SESSION_KEY, resumeSession, selectPersona, exitSession } from '../src/utils/session.js';
 import { MAX_SAMPLE_BYTES, SAMPLES_KEY, extractSample, listSamples, removeSample, saveSample } from '../src/utils/samples.js';
 
 const marker = '{"v":1,"signedIn":true}';
@@ -27,11 +27,15 @@ function txt(bytes, metadata = {}) {
     arrayBuffer: async () => contents.buffer, ...metadata };
 }
 
-/** Submit the public pair through the rendered gate. */
+/** Choose the Portfolio Manager perspective through the rendered entry. */
 function enterDemo() {
-  fireEvent.change(screen.getByLabelText('Username'), { target: { value: 'tower-demo' } });
-  fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'synthetic-only' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Portfolio Manager' }));
+}
+
+/** Open the current demo role disclosure and exit the workshop. */
+function exitDemo() {
+  fireEvent.click(screen.getByText('Demo role', { exact: true }).closest('summary'));
+  fireEvent.click(screen.getByRole('button', { name: 'Exit workshop' }));
 }
 
 /** Open the sample route with an existing, documented session marker. */
@@ -49,42 +53,43 @@ function stage(file) {
 const extractButton = () => screen.getByRole('button', { name: 'Extract and Save' });
 
 describe('local workshop session', () => {
-  it.each([['', ''], ['Tower-demo', 'synthetic-only'], ['tower-demo', 'synthetic-only ']])(
-    'does not persist a nonexact pair (%s)', (username, password) => {
-      expect(signIn(username, password, localStorage)).toEqual({ ok: false, code: 'DEMO_INPUT_INVALID' });
+  it.each(['', 'Portfolio', 'portfolio ', 'constructor'])(
+    'does not persist an unknown role (%s)', role => {
+      expect(selectPersona(role, localStorage)).toEqual({ ok: false, code: 'UNKNOWN_PERSONA' });
       expect(localStorage.length).toBe(0);
     },
   );
 
-  it('repairs only fictitious credentials before marking entry and removes only the session on exit', () => {
-    localStorage.setItem(CREDENTIALS_KEY, '{"v":1,"username":"tampered","password":"tampered"}');
-    localStorage.setItem(SAMPLES_KEY, '{"v":1,"records":[]}');
-    expect(resumeSession(localStorage)).toEqual({ ok: true, signedIn: false });
-    expect(signIn('tower-demo', 'synthetic-only', localStorage)).toEqual({ ok: true, signedIn: true });
+  it('reads a legacy marker without writing, persists only the role, and exits without touching samples', () => {
+    localStorage.setItem(SAMPLES_KEY, retainedBytes);
+    expect(resumeSession(localStorage)).toEqual({ ok: true });
+    localStorage.setItem(SESSION_KEY, marker);
+    expect(resumeSession(localStorage)).toEqual({ ok: true, persona: 'portfolio' });
     expect(localStorage.getItem(SESSION_KEY)).toBe(marker);
-    expect(resumeSession(localStorage).signedIn).toBe(true);
-    expect(signOut(localStorage)).toEqual({ ok: true, signedIn: false });
+    expect(selectPersona('asset', localStorage)).toEqual({ ok: true, persona: 'asset' });
+    expect(JSON.parse(localStorage.getItem(SESSION_KEY))).toEqual({ v: 2, persona: 'asset' });
+    expect(resumeSession(localStorage).persona).toBe('asset');
+    expect(localStorage.length).toBe(2);
+    expect(exitSession(localStorage)).toEqual({ ok: true });
     expect(localStorage.getItem(SESSION_KEY)).toBeNull();
-    expect(JSON.parse(localStorage.getItem(CREDENTIALS_KEY))).toEqual(DEMO_CREDENTIALS);
-    expect(localStorage.getItem(SAMPLES_KEY)).toBe('{"v":1,"records":[]}');
+    expect(localStorage.getItem(SAMPLES_KEY)).toBe(retainedBytes);
   });
 
-  it.each(['{', '{"v":2,"signedIn":true}', '{"v":1,"signedIn":"true"}', '{"v":1,"signedIn":true,"token":0}'])(
+  it.each(['{', '{"v":2,"signedIn":true}', '{"v":2,"persona":"unknown"}', '{"v":1,"signedIn":"true"}', '{"v":1,"signedIn":true,"token":0}'])(
     'fails closed on invalid markers without overwriting them (%s)', raw => {
       localStorage.setItem(SESSION_KEY, raw);
-      expect(resumeSession()).toEqual({ ok: false, signedIn: false, code: 'STORE_VERSION_INVALID' });
+      expect(resumeSession()).toEqual({ ok: false, code: 'STORE_VERSION_INVALID' });
       expect(localStorage.getItem(SESSION_KEY)).toBe(raw);
     },
   );
 
-  it('locks deep links, does not read samples on portfolio entry, and fails closed on a blocked marker write', () => {
+  it('shows entry before opening deep links, does not read samples on portfolio entry, and fails closed on a blocked marker write', () => {
     window.history.replaceState(null, '', '/#/samples');
     const reads = vi.spyOn(Storage.prototype, 'getItem');
     render(createElement(App));
-    expect(screen.getByRole('heading', { name: /Sign in to Tower/ })).toHaveFocus();
+    expect(screen.getByRole('heading', { name: 'Choose a demo role' })).toHaveFocus();
     expect(screen.queryByRole('navigation')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
-    expect(screen.getByRole('alert')).toHaveTextContent('Enter the exact demo username and password');
+    expect(screen.queryByLabelText('Password')).not.toBeInTheDocument();
     const original = Storage.prototype.setItem;
     const failure = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (key, value) {
       if (key === SESSION_KEY) throw new DOMException('Blocked', 'QuotaExceededError');
@@ -93,7 +98,6 @@ describe('local workshop session', () => {
     enterDemo();
     expect(screen.getByRole('alert')).toHaveTextContent('Browser storage is unavailable');
     expect(localStorage.getItem(SESSION_KEY)).toBeNull();
-    expect(screen.getByLabelText('Password')).toHaveValue('');
     failure.mockRestore();
     enterDemo();
     expect(screen.getByRole('heading', { name: 'Portfolio scenario' })).toHaveFocus();
@@ -103,14 +107,14 @@ describe('local workshop session', () => {
   it('warns on failed deletion, hides the workshop, and clears the marker on explicit retry', () => {
     openIntake();
     const removal = vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => { throw new Error('Blocked'); });
-    fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+    exitDemo();
     expect(screen.getByRole('alert')).toHaveTextContent('Reloading may restore it');
     expect(screen.queryByRole('navigation')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Sign in' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Portfolio Manager' })).not.toBeInTheDocument();
     expect(localStorage.getItem(SESSION_KEY)).toBe(marker);
     removal.mockRestore();
-    fireEvent.click(screen.getByRole('button', { name: 'Retry Sign Out' }));
-    expect(screen.getByRole('heading', { name: /Sign in to Tower/ })).toHaveFocus();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry exit' }));
+    expect(screen.getByRole('heading', { name: 'Choose a demo role' })).toHaveFocus();
     expect(localStorage.getItem(SESSION_KEY)).toBeNull();
   });
 });
@@ -259,7 +263,7 @@ describe('isolated synthetic samples', () => {
       expect(extractButton()).toBeDisabled();
       if (intent === 'cancel') fireEvent.click(screen.getByRole('button', { name: 'Cancel selection' }));
       if (intent === 'new selection') stage(txt('replacement'));
-      if (intent === 'sign out') fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+      if (intent === 'sign out') exitDemo();
       if (intent === 'other tab') {
         localStorage.removeItem(SESSION_KEY);
         act(() => window.dispatchEvent(new StorageEvent('storage', { key: SESSION_KEY, oldValue: marker, storageArea: localStorage })));

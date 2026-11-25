@@ -1,93 +1,85 @@
-/** Present the fixed public workshop entry and recover from blocked sign-out. */
+/** Present direct entry into a synthetic workshop perspective. */
 import PropTypes from 'prop-types';
-import { useEffect, useId, useRef } from 'react';
-import { focus } from '../components/GlobalBar.jsx';
-import { DEMO_CREDENTIALS } from '../utils/session.js';
+import { useEffect, useRef } from 'react';
+import { focus, WorkshopBrand } from '../components/GlobalBar.jsx';
+import { PERSONAS } from '../utils/session.js';
 
-const field = `min-h-11 w-full rounded-md border border-border bg-surface px-3 ${focus}`;
-const button = `min-h-11 rounded-md border border-border px-4 text-sm font-medium ${focus}`;
+const roleIcons = {
+  portfolio: 'M3 3h8v8H3zM15 3h6v8h-6zM3 15h8v6H3zM15 15h6v6h-6z',
+  asset: 'M8 5H5v16h14V5h-3M9 3h6v4H9zM8 12h8m-8 4h6',
+  commercial: 'M3 4v16h18M6 15l5-5 4 2 6-7m-5 0h5v5',
+  operations: 'M3 12h4l3-7 4 14 3-7h4',
+  facilitator: 'M3 6h10m4 0h4M3 12h4m4 0h10M3 18h12m4 0h2M13 4h4v4h-4zM7 10h4v4H7zM15 16h4v4h-4z',
+};
+
 const notices = {
-  DEMO_INPUT_INVALID: 'Enter the exact demo username and password shown above.',
-  STORAGE_UNAVAILABLE: 'Browser storage is unavailable. Enable storage and try again.',
-  STORE_VERSION_INVALID: 'The saved session could not be restored. Sign in again to replace the marker, or clear site data to remove all local workshop data.',
+  STORAGE_UNAVAILABLE: 'Browser storage is unavailable. Enable site storage, then select a role again.',
+  STORE_VERSION_INVALID: 'The saved demo session could not be restored. Select a role to replace it.',
+  UNKNOWN_PERSONA: 'That demo role is unavailable. Choose one of the roles below.',
 };
 
 /**
- * Render the signed-out form or the pending-clear recovery, never both.
+ * Show the role picker or, exclusively, recovery for an unconfirmed exit.
  * Args:
- *   error: Safe session or input error code.
- *   pendingClear: Whether saved marker deletion is unconfirmed.
- *   onSignIn: Submit the entered pair to the workshop gate.
- *   onRetry: Retry deleting the saved marker.
+ *   error: Recoverable marker error, if present.
+ *   pendingClear: Whether exiting still requires removal of the saved marker.
+ *   onSelect: Enter the selected demo perspective.
+ *   onRetry: Retry removing the saved session marker.
  */
-export default function SignInPage({ error, pendingClear, onSignIn, onRetry }) {
-  const id = useId();
+export default function SignInPage({ error, pendingClear, onSelect, onRetry }) {
   const heading = useRef(null);
   useEffect(() => { heading.current?.focus(); }, [pendingClear]);
-  const invalid = error === 'DEMO_INPUT_INVALID';
-
-  /**
-   * Submit without any form navigation and discard the attempted password.
-   * Args:
-   *   event: Native form submission wrapped by React.
-   */
-  function submit(event) {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const values = new FormData(form);
-    form.elements.password.value = '';
-    if (onSignIn(values.get('username'), values.get('password'))) form.reset();
-  }
 
   return (
-    <main className="min-h-screen bg-background px-5 py-12 text-foreground sm:px-8 sm:py-20">
-      <div className="mx-auto max-w-md">
-        <p className="text-xs font-medium uppercase tracking-[.14em] text-foreground-muted">ESDT · Synthetic workshop</p>
-        <h1 ref={heading} tabIndex={-1} className="mt-3 text-3xl font-semibold tracking-tight">
-          {pendingClear ? 'Sign-out needs attention' : 'Sign in to Tower Intelligence'}
+    <div className="workshop-entry min-h-screen font-sans">
+      <header className="border-b border-border bg-surface">
+        <div className="mx-auto max-w-6xl px-5 py-4 sm:px-8">
+          <WorkshopBrand />
+        </div>
+      </header>
+      <main className="mx-auto max-w-6xl px-5 py-10 sm:px-8 sm:py-16">
+        <p className="mb-3 text-xs font-semibold uppercase tracking-[.14em] text-foreground-muted">TowerCo decision workshop</p>
+        <h1 ref={heading} tabIndex={-1} className="workshop-entry-title max-w-prose font-semibold tracking-tight">
+          {pendingClear ? 'Workshop exit needs attention' : 'Choose a demo role'}
         </h1>
         {pendingClear ? (
-          <div className="mt-5 space-y-5">
+          <div className="mt-5 max-w-prose space-y-5">
             <p role="alert">The workshop is hidden, but the saved session could not be removed. Reloading may restore it. Enable browser storage and retry. If removal stays blocked, clear site data before reloading; this also deletes retained samples.</p>
-            <button type="button" className={`${button} bg-surface hover:bg-surface-raised`} onClick={onRetry}>Retry Sign Out</button>
+            <button type="button" className={`min-h-11 rounded-md border border-border bg-surface px-4 text-sm font-medium hover:bg-surface-raised ${focus}`} onClick={onRetry}>Retry exit</button>
           </div>
         ) : (
           <>
-            <p className="mt-3 text-foreground-muted">This browser-only demo gate is not authorization. Use only these fictitious credentials, not a real account.</p>
-            <dl className="mt-5 space-y-1 border-y border-border py-3 text-sm">
-              <div className="flex flex-wrap gap-x-2">
-                <dt>Demo username:</dt>
-                <dd className="font-mono">{DEMO_CREDENTIALS.username}</dd>
-              </div>
-              <div className="flex flex-wrap gap-x-2">
-                <dt>Demo password:</dt>
-                <dd className="font-mono">{DEMO_CREDENTIALS.password}</dd>
-              </div>
-            </dl>
-            <form onSubmit={submit} noValidate className="mt-6 space-y-4">
-              <div className="space-y-1">
-                <label htmlFor={`${id}-username`} className="block text-sm font-medium">Username</label>
-                <input id={`${id}-username`} name="username" autoComplete="off" autoCapitalize="none" spellCheck={false} required
-                  aria-invalid={invalid || undefined} aria-describedby={invalid ? `${id}-error` : undefined} className={field} />
-              </div>
-              <div className="space-y-1">
-                <label htmlFor={`${id}-password`} className="block text-sm font-medium">Password</label>
-                <input id={`${id}-password`} name="password" type="password" autoComplete="off" required
-                  aria-invalid={invalid || undefined} aria-describedby={invalid ? `${id}-error` : undefined} className={field} />
-              </div>
-              {notices[error] && <p id={`${id}-error`} role="alert" className="text-sm">{notices[error]}</p>}
-              <button type="submit" className={`${button} border-transparent bg-primary-700 text-white hover:bg-primary-800`}>Sign in</button>
-            </form>
+            <p className="mt-3 max-w-prose text-foreground-muted">Explore the same synthetic US tower portfolio from five perspectives. Your role sets the starting view, not your permissions.</p>
+            {notices[error] && <p role="alert" className="mt-5 max-w-prose rounded-md border border-border bg-surface p-3 text-sm text-error">{notices[error]}</p>}
+            <ul aria-label="Demo roles" className="workshop-role-grid mt-8">
+              {Object.entries(PERSONAS).map(([id, role]) => (
+                <li key={id}>
+                  <button type="button" className="workshop-role" aria-labelledby={`role-name-${id}`}
+                    aria-describedby={`role-job-${id} role-start-${id}`} onClick={() => onSelect(id)}>
+                    <svg className="workshop-role-icon" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d={roleIcons[id]} />
+                    </svg>
+                    <span id={`role-name-${id}`} className="workshop-role-name">{role.name}</span>
+                    <span id={`role-job-${id}`} className="text-sm leading-relaxed text-foreground-muted">{role.description}</span>
+                    <span id={`role-start-${id}`} className="workshop-role-start">
+                      <span>{role.start}</span>
+                      <span aria-hidden="true">→</span>
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-6 border-t border-border pt-4 text-sm text-foreground-muted">Fixture data only. No real work orders, engineering approvals or commercial commitments.</p>
           </>
         )}
-      </div>
-    </main>
+      </main>
+    </div>
   );
 }
 
 SignInPage.propTypes = {
   error: PropTypes.string,
   pendingClear: PropTypes.bool.isRequired,
-  onSignIn: PropTypes.func.isRequired,
+  onSelect: PropTypes.func.isRequired,
   onRetry: PropTypes.func.isRequired,
 };
