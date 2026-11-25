@@ -2,6 +2,8 @@
 import PropTypes from 'prop-types';
 import { createContext, useCallback, useContext, useMemo, useReducer, useRef } from 'react';
 import { loadBaseline } from '../utils/fixtures.js';
+import { listAlerts } from '../utils/alerts.js';
+import { deriveAssessments } from '../utils/health.js';
 import { createPortfolioState, reduce } from '../utils/portfolioReducer.js';
 import { summarizeBaseline } from '../utils/scenario.js';
 
@@ -13,7 +15,9 @@ export function PortfolioProvider({ children, fixtureResult }) {
   const commandId = useRef(0);
   const send = useCallback(command => dispatch({ ...command, commandId: ++commandId.current }), []);
   const summary = useMemo(() => state.snapshot && summarizeBaseline(state.snapshot), [state.snapshot]);
-  const value = useMemo(() => ({ state, snapshot: state.snapshot, summary, send }), [state, summary, send]);
+  const assessments = useMemo(() => deriveAssessments(state.snapshot), [state.snapshot]);
+  const alerts = useMemo(() => listAlerts(state.snapshot, state.workflow.alerts), [state.snapshot, state.workflow.alerts]);
+  const value = useMemo(() => ({ state, snapshot: state.snapshot, summary, assessments, alerts, send }), [state, summary, assessments, alerts, send]);
 
   return <PortfolioContext.Provider value={value}>{children}</PortfolioContext.Provider>;
 }

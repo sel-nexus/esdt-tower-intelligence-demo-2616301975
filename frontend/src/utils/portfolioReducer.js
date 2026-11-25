@@ -1,4 +1,5 @@
 /** Commit portfolio control intents as atomic, tab-local state transitions. */
+import { transitionAlert } from './alerts.js';
 import { isRecord, readAttribute } from './fixtures.js';
 import { buildSnapshot, createBaselineControls, MASK_ATTRIBUTES, maskKey, validateSettingsPatch } from './scenario.js';
 
@@ -31,7 +32,7 @@ const reject = (state, code) => ({ ...state, result: { ok: false, code } });
  *
  * Args:
  *   state: Current state including the committed snapshot and fixture.
- *   command: A switch, mask, settings or reset intent with a tab-local command ID.
+ *   command: A control or alert intent with a tab-local command ID.
  * Returns:
  *   State with the command result, or the identical state for a stale ID.
  */
@@ -39,6 +40,19 @@ export function reduce(state, command) {
   if (!isRecord(command) || !Number.isSafeInteger(command.commandId) || command.commandId <= state.lastCommandId) return state;
   const committed = { ...state, lastCommandId: command.commandId };
   if (!state.snapshot) return reject(committed, 'INVALID_FIXTURE');
+
+  if (command.kind === 'setAlert') {
+    if (command.snapshotRevision !== undefined && command.snapshotRevision !== state.snapshot.snapshotRevision) return reject(committed, 'STALE_VIEW');
+    const next = transitionAlert(state.snapshot, state.workflow.alerts, command.alertId, command.to);
+    if (!next.ok) return reject(committed, next.code);
+    if (next.code) return { ...committed, result: { ok: true, code: next.code } };
+    return {
+      ...committed,
+      workflow: { ...state.workflow, alerts: next.edits },
+      workflowRevision: state.workflowRevision + 1,
+      result: { ok: true, from: next.from, to: next.to },
+    };
+  }
 
   let controls = state.controls;
   switch (command.kind) {

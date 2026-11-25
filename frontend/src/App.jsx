@@ -1,6 +1,8 @@
-/** Compose the standalone scenario workshop view. */
+/** Compose the scenario workshop and the assessment hash routes. */
+import { useEffect, useRef, useState } from 'react';
 import { PortfolioProvider, usePortfolio } from './components/PortfolioProvider.jsx';
 import { ScenarioControls } from './components/ScenarioControls.jsx';
+import AssessmentPage from './pages/AssessmentPage.jsx';
 
 const dollars = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
 
@@ -8,15 +10,8 @@ const dollars = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'U
 function ScenarioWorkshop() {
   const { state, snapshot, summary } = usePortfolio();
   return (
-    <div className="min-h-screen bg-background font-sans text-foreground">
-      <header className="border-b border-border bg-surface">
-        <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3 px-5 py-4 sm:px-8">
-          <p className="text-sm font-semibold">ESDT Tower Intelligence</p>
-          <p className="text-xs font-medium uppercase tracking-wider text-foreground-muted">Synthetic workshop</p>
-        </div>
-      </header>
-      <main className="mx-auto max-w-5xl px-5 py-8 sm:px-8 sm:py-12">
-        <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">Portfolio scenario</h1>
+      <>
+        <h1 tabIndex={-1} className="text-3xl font-semibold tracking-tight sm:text-4xl">Portfolio scenario</h1>
         <p className="mt-3 max-w-prose text-foreground-muted">Reproduce the baseline, then test how changes to the synthetic inputs affect the active scenario.</p>
         {!snapshot ? (
           <div role="alert" className="mt-7 rounded-lg border border-border bg-surface p-5">
@@ -45,6 +40,44 @@ function ScenarioWorkshop() {
           </>
         )}
         <p className="mt-6 text-sm text-foreground-muted">Provisional demo defaults · Product signoff pending · Indicative assessment only</p>
+      </>
+  );
+}
+
+/** Resolve only the workshop's registered paths, without displaying raw input. */
+function WorkshopRoutes() {
+  const [hash, setHash] = useState(() => window.location.hash);
+  const main = useRef(null);
+  useEffect(() => {
+    const sync = () => setHash(window.location.hash);
+    window.addEventListener('hashchange', sync);
+    return () => window.removeEventListener('hashchange', sync);
+  }, []);
+  useEffect(() => { main.current?.querySelector('h1')?.focus(); }, [hash]);
+  const portfolio = hash === '' || hash === '#/portfolio';
+  const match = /^#\/assessments\/([A-Z0-9-]+)\/overview$/.exec(hash);
+  const assessment = hash === '#/assessments' || Boolean(match);
+  const navLink = 'inline-flex min-h-11 items-center px-2 text-sm font-medium hover:underline focus-visible:outline-ring aria-[current=page]:font-semibold aria-[current=page]:text-primary-700';
+  return (
+    <div className="min-h-screen bg-background font-sans text-foreground">
+      <header className="border-b border-border bg-surface">
+        <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-x-4 px-5 py-2 sm:px-8">
+          <p className="py-1 text-sm font-semibold">ESDT Tower Intelligence</p>
+          <nav aria-label="Workshop">
+            <a href="#/portfolio" className={navLink} aria-current={portfolio ? 'page' : undefined}>Portfolio</a>
+            <a href="#/assessments" className={navLink} aria-current={assessment ? 'page' : undefined}>Assessments</a>
+          </nav>
+          <p className="py-1 text-xs font-medium uppercase tracking-wider text-foreground-muted">Synthetic workshop</p>
+        </div>
+      </header>
+      <main ref={main} className="mx-auto max-w-5xl px-5 py-8 sm:px-8 sm:py-12">
+        {portfolio ? <ScenarioWorkshop /> : assessment ? <AssessmentPage key={hash} siteId={match?.[1]} /> : (
+          <>
+            <h1 tabIndex={-1} className="text-3xl font-semibold tracking-tight">Page not available</h1>
+            <p className="mt-3 text-foreground-muted">This workshop route could not be found.</p>
+            <a href="#/portfolio" className="mt-4 inline-flex min-h-11 items-center text-primary-700 underline underline-offset-4 focus-visible:outline-ring">Return to portfolio</a>
+          </>
+        )}
       </main>
     </div>
   );
@@ -54,7 +87,7 @@ function ScenarioWorkshop() {
 export default function App() {
   return (
     <PortfolioProvider>
-      <ScenarioWorkshop />
+      <WorkshopRoutes />
     </PortfolioProvider>
   );
 }
