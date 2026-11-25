@@ -59,3 +59,41 @@
     .workshop-role { transition: none; }
   }
 }
+
+@layer components {
+  .discovery-title, .discovery-number { color: #003460; }
+  .discovery-link { color: #005fae; }
+  .discovery-action { background: #005fae; }
+  .discovery-action:hover { background: #003460; }
+  .discovery-metric:enabled:hover { border-color: #0082f0; background: #f8fbfe; }
+  .discovery-number { max-width: 100%; font-size: clamp(1.375rem, 1.2rem + 1vw, 2rem); line-height: 1.18; }
+  .discovery-metrics {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 9.25rem), 1fr));
+    gap: 0.75rem;
+  }
+  .discovery-criterion { max-width: 100%; overflow-wrap: anywhere; border-radius: 0.25rem; background: #f5f7fa; padding: 0.25rem 0.5rem; }
+  .discovery-track { display: block; height: 0.5rem; background: #eaf0f5; }
+  .discovery-track > span { display: block; height: 100%; background: var(--discovery-status, #006bc5); }
+
+  [data-tone='good'] { --discovery-status: #176449; --discovery-status-bg: #eaf6ee; }
+  [data-tone='attention'] { --discovery-status: #835008; --discovery-status-bg: #fff3dc; }
+  [data-tone='critical'] { --discovery-status: #9f273a; --discovery-status-bg: #fceff0; }
+  [data-tone='unknown'] { --discovery-status: #526173; --discovery-status-bg: #eef1f5; }
+  .discovery-badge { color: var(--discovery-status); background: var(--discovery-status-bg); }
+  .discovery-map { aspect-ratio: 620 / 360; }
+  .discovery-marker-dot { fill: var(--discovery-status-bg); stroke: var(--discovery-status); stroke-width: 2; }
+  .discovery-marker text { fill: var(--discovery-status); font-size: 12px; }
+  .discovery-marker[data-highlighted='true'] .discovery-marker-dot { fill: #005fae; stroke: #003460; stroke-width: 3; }
+  .discovery-marker[data-highlighted='true'] text { fill: white; }
+  .discovery-result[data-highlighted='true'] { background: #edf5fc; box-shadow: inset 3px 0 #0082f0; }
+
+  @media (min-width: 900px) {
+    .discovery-metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  }
+  @media (max-width: 639px) {
+    .discovery-marker-dot { r: 13px; }
+    .discovery-marker-hit { r: 19px; }
+    .discovery-marker text { font-size: 15px; }
+  }
+}

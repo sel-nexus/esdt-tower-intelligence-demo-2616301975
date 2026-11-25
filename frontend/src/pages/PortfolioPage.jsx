@@ -4,15 +4,22 @@ import { useId } from 'react';
 import { ScenarioControls } from '../components/ScenarioControls.jsx';
 import { focus, TowerLink } from '../components/GlobalBar.jsx';
 import { usePortfolio } from '../components/PortfolioProvider.jsx';
-import { HEALTH_BANDS, READINESS_BANDS } from '../utils/discover.js';
+import { FACET_LABELS, facetOptions, HEALTH_BANDS, READINESS_BANDS } from '../utils/discover.js';
 import { formatIllustrativeUsd } from '../utils/economics.js';
 
 const primaryKeys = ['towers', 'tenants', 'average', 'revenue', 'healthy', 'critical', 'opportunities', 'alerts'];
-const link = `text-primary-700 underline underline-offset-4 ${focus}`;
+const link = `discovery-link underline underline-offset-4 ${focus}`;
+const metricNotes = {
+  average: 'Active tenants per active tower',
+  healthy: 'Good sites as a share of active towers',
+  opportunities: 'High-opportunity cohort: Yes or Yes after an upgrade',
+};
+const quickFacets = { type: 'Tower type', geography: 'State', health: 'Assessment status' };
+const healthTones = { Good: 'good', 'Needs Attention': 'attention', Critical: 'critical', Unknown: 'unknown' };
 
 /** Format a metric without losing the distinction between zero and unavailable. */
 function display(key, value) {
-  if (value === null) return 'Unknown';
+  if (value === null) return 'Unavailable';
   if (key === 'revenue') return formatIllustrativeUsd(value);
   if (key === 'average') return value.toFixed(2);
   if (key === 'healthy') return `${Number(value.toFixed(1))}%`;
@@ -20,7 +27,7 @@ function display(key, value) {
 }
 
 /** Activate the exact contributor cohort represented by a current metric. */
-function SignalTile({ tile, compact = false, label }) {
+function SignalTile({ tile, label, share, tone }) {
   const { send } = usePortfolio();
   const key = tile.ref.key;
   const coverageId = useId();
@@ -29,15 +36,28 @@ function SignalTile({ tile, compact = false, label }) {
     send({ kind: 'signal', ref: tile.ref });
     window.location.hash = '#/map';
   }
+  if (share !== undefined) {
+    return (
+      <button type="button" onClick={drill} aria-label={label} title={`${tile.value} ${tile.value === 1 ? 'tower' : 'towers'} · ${Number(share.toFixed(1))}% of scope`}
+        className={`group grid min-h-11 w-full grid-cols-[minmax(0,1fr)_minmax(2rem,1fr)_2rem] items-center gap-2 rounded px-1 text-left text-sm hover:bg-surface-raised ${focus}`}>
+        <span className="group-hover:underline">{tile.label}</span>
+        <span aria-hidden="true" className="discovery-track">
+          <span data-tone={tone} style={{ width: `${share}%` }} />
+        </span>
+        <strong className="text-right tabular-nums">{tile.value}</strong>
+      </button>
+    );
+  }
   return (
     <button type="button" onClick={drill} disabled={tile.siteIds === null} aria-label={label} aria-describedby={coverageId}
-      className={`group flex h-full w-full flex-col items-start rounded-md border border-border bg-surface text-left enabled:hover:border-primary-500 disabled:cursor-not-allowed ${compact ? 'p-3' : 'p-4 sm:p-5'} ${focus}`}>
-      <span className="text-sm font-medium text-foreground-muted">{tile.label}</span>
-      <strong className={`my-1 font-semibold tracking-tight tabular-nums ${compact ? 'text-xl' : 'text-2xl sm:text-3xl'}`}>{display(key, tile.value)}</strong>
-      <span id={coverageId} className="mt-auto text-xs text-foreground-muted">
+      className={`discovery-metric group flex h-full w-full min-w-0 flex-col items-start rounded-md border border-border bg-surface p-3 text-left disabled:cursor-not-allowed sm:p-5 ${focus}`}>
+      <span className="text-sm font-semibold">{tile.label}</span>
+      <strong className="discovery-number mb-2 mt-1 break-words font-semibold tracking-tight tabular-nums">{display(key, tile.value)}</strong>
+      <span id={coverageId} className="mt-auto grid gap-1 text-xs text-foreground-muted">
+        {metricNotes[key] && <span>{metricNotes[key]}</span>}
         {tile.coverage ? `${tile.coverage.known}/${tile.coverage.total} towers with known inputs` : `${tile.siteIds?.length ?? 0} contributing towers`}
       </span>
-      {tile.siteIds !== null && <span aria-hidden="true" className="mt-2 text-xs font-semibold text-primary-700 group-hover:underline">View towers →</span>}
+      {tile.siteIds !== null && <span aria-hidden="true" className="discovery-link mt-2 text-xs font-semibold group-hover:underline">View towers →</span>}
     </button>
   );
 }
@@ -46,8 +66,52 @@ SignalTile.propTypes = {
   tile: PropTypes.shape({ label: PropTypes.string.isRequired, value: PropTypes.number, siteIds: PropTypes.arrayOf(PropTypes.string),
     coverage: PropTypes.shape({ known: PropTypes.number.isRequired, total: PropTypes.number.isRequired }),
     ref: PropTypes.shape({ key: PropTypes.string.isRequired }).isRequired }).isRequired,
-  compact: PropTypes.bool, label: PropTypes.string.isRequired,
+  label: PropTypes.string.isRequired, share: PropTypes.number, tone: PropTypes.string,
 };
+
+/** Show shared search, facets, and the reset that leaves the scenario unchanged. */
+export function DiscoveryCriteria() {
+  const { state, send } = usePortfolio();
+  const { query, filters, signal } = state.discovery;
+  const active = Object.entries(filters).filter(([, values]) => values.length);
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+      <ul aria-label="Active discovery criteria" className="flex min-w-0 flex-wrap gap-2 text-sm text-foreground-muted">
+        {query.trim() && <li className="discovery-criterion">Search: {query.trim()}</li>}
+        {active.map(([key, values]) => <li key={key} className="discovery-criterion">{FACET_LABELS[key]}: {values.join(', ')}</li>)}
+        {!query.trim() && !active.length && <li>No search or facet filters applied.</li>}
+      </ul>
+      <button type="button" className={`ml-auto min-h-11 rounded-md border border-border bg-surface px-3 text-sm font-semibold enabled:hover:bg-surface-raised disabled:text-foreground-muted ${focus}`}
+        disabled={!query && !active.length && !signal} onClick={() => send({ kind: 'clearDiscovery' })}>Clear search and filters</button>
+    </div>
+  );
+}
+
+/** Offer quick choices without discarding multiple choices made on the map until edited. */
+function QuickFilters() {
+  const { snapshot, state, send } = usePortfolio();
+  const options = facetOptions(snapshot);
+  return (
+    <fieldset className="mb-4 grid min-w-0 gap-3 sm:grid-cols-3">
+      <legend className="mb-2 text-sm font-semibold">Quick filters</legend>
+      {Object.entries(quickFacets).map(([key, label]) => {
+        const selected = state.discovery.filters[key] ?? [];
+        return (
+          <label key={key} className="grid min-w-0 gap-1 text-sm text-foreground-muted">
+            {label}
+            <select value={selected.length > 1 ? '__multiple' : selected[0] ?? ''}
+              onChange={event => send({ kind: 'setFacet', key, value: event.target.value })}
+              className={`min-h-11 w-full rounded-md border border-border bg-surface px-2 text-foreground ${focus}`}>
+              <option value="">Any</option>
+              {selected.length > 1 && <option value="__multiple" disabled>Multiple selected</option>}
+              {options[key].map(option => <option key={option}>{option}</option>)}
+            </select>
+          </label>
+        );
+      })}
+    </fieldset>
+  );
+}
 
 /** Explain a rejected fixture without offering partial portfolio results. */
 export function FixtureRecovery() {
@@ -69,10 +133,10 @@ export default function PortfolioPage() {
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[.16em] text-foreground-muted">Portfolio intelligence / Overview</p>
-          <h1 tabIndex={-1} className="mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">Portfolio scenario</h1>
+          <h1 tabIndex={-1} className="discovery-title mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">Portfolio scenario</h1>
           <p className="mt-2 max-w-prose text-foreground-muted">See where to protect the portfolio and where to investigate growth.</p>
         </div>
-        <a href="#/map" className={`inline-flex min-h-11 items-center rounded-md bg-primary-700 px-4 text-sm font-semibold text-white hover:bg-primary-800 ${focus}`}>Explore towers →</a>
+        <a href="#/map" className={`discovery-action inline-flex min-h-11 items-center rounded-md px-4 text-sm font-semibold text-white ${focus}`}>Explore towers →</a>
       </div>
       {!snapshot ? <FixtureRecovery /> : (
         <>
@@ -81,17 +145,37 @@ export default function PortfolioPage() {
               <h2 className="text-lg font-semibold tracking-tight">Active portfolio</h2>
               <p className="text-sm font-medium tabular-nums text-foreground-muted">{snapshot.scenarioLabel} · {snapshot.referenceDate} (UTC)</p>
             </div>
-            <div className="grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-4">
+            <div className="mb-4 rounded-md border border-border bg-surface p-3 sm:p-4">
+              <QuickFilters />
+              <DiscoveryCriteria />
+              <p aria-live="polite" className="mt-3 border-t border-border pt-3 text-sm text-foreground-muted">
+                <strong className="text-foreground">{kpis.towers.value} {kpis.towers.value === 1 ? 'active tower' : 'active towers'} in scope.</strong>{' '}
+                {kpis.towers.value ? 'Metrics, distributions, and shortlists follow these criteria.' : 'Clear search and filters to broaden the scope.'}
+              </p>
+            </div>
+            <div className="discovery-metrics">
               {primaryKeys.map(key => <SignalTile key={key} tile={kpis[key]} label={`${kpis[key].label}: ${display(key, kpis[key].value)}`} />)}
             </div>
             <div className="mt-7 grid gap-6 lg:grid-cols-2">
               {distributions.map(([group, title, bands]) => (
-                <div key={group}>
-                  <h3 className="mb-2 text-sm font-semibold">{title}</h3>
-                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-5">
-                    {bands.map(band => <SignalTile key={band} compact tile={kpis[`${group}:${band}`]} label={`${title}: ${band}, ${kpis[`${group}:${band}`].value}`} />)}
-                  </div>
-                </div>
+                <figure key={group} aria-label={title} className="min-w-0 rounded-md border border-border bg-surface p-4 sm:p-5">
+                  <figcaption className="mb-2">
+                    <h3 className="font-semibold">{title}</h3>
+                    <p className="mt-1 text-xs text-foreground-muted">Tower count by {group === 'health' ? 'health status' : 'colocation decision'}. Bar lengths show share of scope.</p>
+                  </figcaption>
+                  <ul>
+                    {bands.map(band => {
+                      const tile = kpis[`${group}:${band}`];
+                      return (
+                        <li key={band}>
+                          <SignalTile tile={tile} label={`${title}: ${band}, ${tile.value}`}
+                            share={kpis.towers.value ? 100 * tile.value / kpis.towers.value : 0}
+                            tone={group === 'health' ? healthTones[band] : band === 'Unknown' ? 'unknown' : undefined} />
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </figure>
               ))}
             </div>
           </section>
@@ -100,9 +184,10 @@ export default function PortfolioPage() {
               <h2 id="shortlist-title" className="text-xl font-semibold tracking-tight">Priority shortlists</h2>
               <a href="#/actions" className={`text-sm ${link}`}>View action queues →</a>
             </div>
-            <p className="mt-1 text-sm text-foreground-muted">Up to five active towers per queue, in the shared priority order.</p>
+            <p className="mt-1 text-sm text-foreground-muted">Up to five in-scope towers per queue, in the shared priority order.</p>
             <div className="mt-4 grid gap-3 md:grid-cols-2">
-              {shortlists.map(({ view, incomplete, entries }) => (
+              {[...shortlists.filter(({ view }) => view === 'Critical Sites' || view === 'Growth Opportunities'),
+                ...shortlists.filter(({ view }) => view !== 'Critical Sites' && view !== 'Growth Opportunities')].map(({ view, incomplete, entries }) => (
                 <section key={view} aria-label={`${view} shortlist`} className="min-w-0 rounded-md border border-border bg-surface p-4 sm:p-5">
                   <h3 className="font-semibold">{view}</h3>
                   {incomplete && <p className="mt-1 text-sm text-foreground-muted">Shortlist incomplete: some towers lack evidence for eligibility or rank.</p>}

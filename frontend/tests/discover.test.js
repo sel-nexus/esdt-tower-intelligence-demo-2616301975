@@ -13,7 +13,7 @@ import { loadBaseline, validateBundle } from '../src/utils/fixtures.js';
 import { createPortfolioState, reduce } from '../src/utils/portfolioReducer.js';
 import { rankActions, selectQueue } from '../src/utils/actions.js';
 import { listAlerts } from '../src/utils/alerts.js';
-import { formatUtilization, reduceDiscovery, selectDiscovery, selectKpis, selectShortlists } from '../src/utils/discover.js';
+import { formatUtilization, reduceDiscovery, selectDiscovery, selectKpis, selectPortfolioScope, selectShortlists } from '../src/utils/discover.js';
 
 const nyc = 'NYC-10234';
 const chi = 'CHI-40117';
@@ -67,6 +67,19 @@ describe('portfolio membership and ranking', () => {
     }
   });
 
+  it('preserves unknown health and opportunity evidence instead of treating it as a negative decision', () => {
+    const incomplete = new Map(assessments);
+    incomplete.set(nyc, { ...assessments.get(nyc), health: { band: 'Unknown' }, readiness: { answer: 'Need More Information' } });
+    const scope = selectPortfolioScope(snapshot, incomplete, { query: nyc, filters: { opportunity: ['Unknown'] } });
+    const tiles = selectKpis(snapshot, incomplete, alerts, scope);
+    expect(tiles.towers.siteIds).toEqual([nyc]);
+    expect(tiles.healthy).toMatchObject({ value: null, siteIds: null, coverage: { known: 0, total: 1 } });
+    expect(tiles['health:Unknown'].value).toBe(1);
+    expect(tiles['readiness:Need More Information'].value).toBe(1);
+    expect(tiles.opportunities.siteIds).toEqual([]);
+    expect(selectPortfolioScope(snapshot, incomplete, { query: nyc, filters: { opportunity: ['Not eligible'] } }).size).toBe(0);
+  });
+
   it('re-resolves a drill-in after an alert change without replacing the snapshot or assessments', () => {
     const active = command(baseline, { kind: 'signal', ref: kpis.alerts.ref });
     const open = alerts.find(alert => alert.status === 'Open' && alerts.filter(row => row.status === 'Open' && row.siteId === alert.siteId).length === 1);
@@ -96,7 +109,7 @@ describe('map and list sharing', () => {
   it.each([
     ['health', 'Good'], ['type', snapshot.sitesById.get(nyc).type], ['geography', 'NY'], ['tenants', '2–3'],
     ['inspection', assessments.get(nyc).inspection.due ? 'Due' : 'Not due'],
-    ['readiness', 'Yes after an upgrade'], ['cost', 'Within thresholds'],
+    ['readiness', 'Yes after an upgrade'], ['opportunity', 'Eligible'], ['cost', 'Within thresholds'],
   ])('keeps row and marker identities aligned for %s', (dimension, value) => {
     const match = view({ filters: { [dimension]: [value] } });
     expect(match.siteIds).not.toHaveLength(0);
@@ -176,6 +189,19 @@ describe('map and list sharing', () => {
     expect(rejected.assessments).toBe(prior.assessments);
     expect(rejected.audit.lastErrorCode).toBe('SIGNAL_UNAVAILABLE');
     expect(rejected.audit.events).toBe(prior.audit.events);
+
+    const scoped = command(state, { kind: 'setFacet', key: 'geography', value: 'IL' });
+    const scopedTiles = selectKpis(state.snapshot, state.assessments, listAlerts(state.snapshot),
+      selectPortfolioScope(state.snapshot, state.assessments, scoped.discovery));
+    const drilled = command(scoped, { kind: 'signal', ref: scopedTiles.revenue.ref });
+    expect(drilled.result.ok).toBe(true);
+    expect(scopedTiles.revenue.siteIds).toEqual([chi]);
+    const widened = command(drilled, { kind: 'setFacet', key: 'geography', value: '' });
+    const widenedTiles = selectKpis(state.snapshot, state.assessments, listAlerts(state.snapshot),
+      selectPortfolioScope(state.snapshot, state.assessments, widened.discovery));
+    expect(selectDiscovery(state.snapshot, state.assessments, widened.discovery, actions, widenedTiles)).toMatchObject({
+      siteIds: [], markerIds: [], signal: { siteIds: null },
+    });
   });
 });
 
@@ -194,6 +220,37 @@ describe('discovery controls', () => {
     row.focus();
     await user.keyboard('{Enter}');
     expect(await screen.findByRole('heading', { name: /CHI-40117/ })).toHaveFocus();
+  });
+
+  it('scopes rollups, shortlists, and contributor drill-down to the same search and quick filters', async () => {
+    window.localStorage.setItem('esdt.demo.session.v1', '{"v":1,"signedIn":true}');
+    const user = userEvent.setup();
+    render(createElement(App));
+    const summary = within(screen.getByRole('region', { name: 'Active scenario summary' }));
+    await user.selectOptions(summary.getByRole('combobox', { name: 'State' }), 'NY');
+    const search = screen.getByRole('searchbox', { name: 'Search towers' });
+    await user.type(search, nyc);
+    await user.keyboard('{Escape}');
+    expect(summary.getByRole('button', { name: 'Active towers: 1' })).toBeVisible();
+    expect(summary.getByRole('button', { name: 'Health distribution: Good, 1' })).toBeVisible();
+    expect(summary.getByRole('button', { name: 'Readiness distribution: Yes after an upgrade, 1' })).toBeVisible();
+    expect(summary.getByRole('button', { name: 'Readiness distribution: Unknown, 0' })).toBeVisible();
+    expect(within(screen.getByRole('region', { name: 'Critical Sites shortlist' })).queryByRole('link')).not.toBeInTheDocument();
+    expect(within(screen.getByRole('region', { name: 'Growth Opportunities shortlist' })).getByRole('link')).toHaveTextContent(nyc);
+    await user.click(summary.getByRole('button', { name: 'Growth opportunities: 1' }));
+    expect(await screen.findByText('1 matching tower · 1 on map')).toBeVisible();
+    const criteria = within(screen.getByRole('list', { name: 'Active discovery criteria' }));
+    expect(criteria.getByText('Geography · state: NY')).toBeVisible();
+    expect(criteria.getByText(`Search: ${nyc}`)).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Clear signal' }));
+    expect(screen.getByText('1 matching tower · 1 on map')).toBeVisible();
+    await user.click(screen.getByRole('link', { name: 'Portfolio', exact: true }));
+    await user.selectOptions(await screen.findByRole('combobox', { name: 'Assessment status' }), 'Critical');
+    expect(screen.getByRole('button', { name: 'Active towers: 0' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Average tenancy: Unavailable' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Clear search and filters' }));
+    expect(screen.getByRole('button', { name: 'Active towers: 25' })).toBeVisible();
+    expect(search).toHaveValue('');
   });
 
   it('prompts for blank search, keeps unmatched input on the current route, and clears back to all towers', async () => {

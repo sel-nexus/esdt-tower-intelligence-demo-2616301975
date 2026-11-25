@@ -78,6 +78,31 @@ test('searches, intersects a filter, switches scenario and resets on a mobile-wi
   expect(viewportFits).toBe(true);
 });
 
+test('keeps scoped KPI contributors and mobile marker and list identities aligned', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/');
+  const summary = page.getByRole('region', { name: 'Active scenario summary' });
+  await summary.getByRole('combobox', { name: 'State' }).selectOption('NY');
+  await expect(summary.getByRole('button', { name: 'Active towers: 1' })).toBeVisible();
+  await expect(summary.getByRole('button', { name: 'Readiness distribution: Yes after an upgrade, 1' })).toBeVisible();
+  await expect(summary.getByRole('button', { name: 'Health distribution: Critical, 0' })).toBeVisible();
+  await summary.getByRole('button', { name: 'Growth opportunities: 1' }).click();
+  await expect(page.getByRole('list', { name: 'Active discovery criteria' })).toContainText('Geography · state: NY');
+  await expect(page.getByText('1 matching tower · 1 on map')).toBeVisible();
+  const markers = page.getByRole('group', { name: 'Tower markers' });
+  const rows = page.getByRole('list', { name: 'Matching towers' });
+  await expect(markers.getByRole('link')).toHaveCount(1);
+  await expect(rows.getByRole('link')).toHaveCount(1);
+  const row = rows.getByRole('link', { name: 'NYC-10234' });
+  await expect(markers.getByRole('link', { name: 'NYC-10234 · Good' })).toHaveAttribute('href', await row.getAttribute('href'));
+  await page.getByRole('button', { name: 'Jump to results' }).click();
+  await expect(page.getByRole('heading', { name: 'Tower results' })).toBeFocused();
+  await page.getByRole('button', { name: 'Clear signal' }).click();
+  await expect(page.getByText('1 matching tower · 1 on map')).toBeVisible();
+  await page.getByRole('button', { name: 'Clear search and filters' }).click();
+  await expect(page.getByText('25 matching towers · 25 on map')).toBeVisible();
+});
+
 test('recovers from an unregistered hash via its portfolio link', async ({ page }) => {
   await page.goto('/#/not-a-workshop-route');
   await expect(page.getByRole('heading', { name: 'Page not available' })).toBeFocused();
