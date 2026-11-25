@@ -5,18 +5,22 @@ import { loadBaseline } from '../utils/fixtures.js';
 import { rankActions } from '../utils/actions.js';
 import { listAlerts } from '../utils/alerts.js';
 import { inspectDiagnostics } from '../utils/diagnostics.js';
+import { reduceDiscovery, selectDiscovery, selectKpis, selectShortlists } from '../utils/discover.js';
 import { downloadText } from '../utils/export.js';
 import { createPortfolioState, reduce } from '../utils/portfolioReducer.js';
 import { summarizeBaseline } from '../utils/scenario.js';
 
 const PortfolioContext = createContext(null);
 
+/** Commit discovery and decision intents through the same ordered reducer. */
+const workshopReducer = (state, command) => reduceDiscovery(reduce, state, command);
+
 /** Read wall-clock time outside the reducer. */
 const nowUtc = () => new Date().toISOString();
 
 /** Load the baseline and expose a single committed snapshot to workshop views. */
 export function PortfolioProvider({ children, fixtureResult, now = nowUtc, download = downloadText }) {
-  const [state, dispatch] = useReducer(reduce, fixtureResult, result => createPortfolioState(result ?? loadBaseline()));
+  const [state, dispatch] = useReducer(workshopReducer, fixtureResult, result => createPortfolioState(result ?? loadBaseline()));
   const commandId = useRef(0);
   const send = useCallback(command => {
     const id = ++commandId.current;
@@ -41,8 +45,13 @@ export function PortfolioProvider({ children, fixtureResult, now = nowUtc, downl
   const alerts = useMemo(() => listAlerts(state.snapshot, state.workflow.alerts), [state.snapshot, state.workflow.alerts]);
   const actions = useMemo(() => rankActions(state.snapshot, assessments, state.workflow), [state.snapshot, assessments, state.workflow]);
   const diagnostics = useMemo(() => inspectDiagnostics(state.snapshot, state.audit), [state.snapshot, state.audit]);
-  const value = useMemo(() => ({ state, snapshot: state.snapshot, summary, assessments, alerts, actions, diagnostics, send, downloadExport }),
-    [state, summary, assessments, alerts, actions, diagnostics, send, downloadExport]);
+  const { snapshot } = state;
+  const kpis = useMemo(() => snapshot ? selectKpis(snapshot, assessments, alerts) : null, [snapshot, assessments, alerts]);
+  const shortlists = useMemo(() => snapshot ? selectShortlists(snapshot, assessments, actions) : [], [snapshot, assessments, actions]);
+  const discovery = useMemo(() => selectDiscovery(snapshot, assessments, state.discovery, actions, kpis),
+    [snapshot, assessments, state.discovery, actions, kpis]);
+  const value = useMemo(() => ({ state, snapshot, summary, assessments, alerts, actions, diagnostics, send, downloadExport, kpis, shortlists, discovery }),
+    [state, snapshot, summary, assessments, alerts, actions, diagnostics, send, downloadExport, kpis, shortlists, discovery]);
 
   return <PortfolioContext.Provider value={value}>{children}</PortfolioContext.Provider>;
 }
