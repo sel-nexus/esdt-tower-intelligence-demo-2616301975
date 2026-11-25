@@ -1,0 +1,30 @@
+{
+  "ruleConfigVersion": 1,
+  "baselineReferenceDate": "2025-03-01",
+  "inspectionValidityDays": 365,
+  "inspectionDueWindowDays": 30,
+  "staleDays": 365,
+  "minConfidence": 60,
+  "expiredHealthPenalty": 8,
+  "expiredConfidencePenalty": 15,
+  "healthWeights": {"structure": 30, "equipment": 20, "power": 20, "maintenance": 15, "dataQuality": 15},
+  "healthBands": {"good": 80, "attention": 60},
+  "readinessWeights": {"structure": 30, "mounting": 20, "space": 15, "power": 20, "connectivity": 15},
+  "readinessBands": {"yes": 85, "upgrade": 70, "information": 50},
+  "powerToleranceKw": 5,
+  "highOperatingCostCents": 3000000,
+  "highEnergyCostCents": 1200000,
+  "upsideCapCents": 5000000,
+  "paybackCapYears": 5,
+  "opportunityWeights": {"readiness": 40, "upside": 30, "payback": 20, "confidence": 10},
+  "conditionScores": {"good": 100, "fair": 75, "poor": 40},
+  "severityOrder": ["Critical", "High", "Medium", "Low"],
+  "governance": {
+    "status": "provisional",
+    "owner": "Product",
+    "rationale": "Frozen assumptions make synthetic workshop cases repeatable. They are not engineering policy or release approval.",
+    "verification": "QA checks six health anchors and both sides of the power threshold; Product signoff is pending.",
+    "units": "UTC calendar days; weights, scores and confidence out of 100; tolerance in kW; money in integer USD cents; payback in years.",
+    "example": {"shortfallKw": 4, "comparisonKw": 3, "defaultKw": 5, "status": "provisional"}
+  }
+}
