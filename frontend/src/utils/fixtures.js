@@ -185,7 +185,9 @@ export function validateBundle(raw) {
   if (!baselineScenario || baselineScenario.referenceDate !== raw.referenceDate || baselineScenario.patches?.length !== 0) return invalid('Missing or modified baseline scenario.');
   for (const scenario of raw.scenarios) {
     if (!hasKeys(scenario, ['scenarioId', 'label', 'referenceDate', 'patches', 'notice'])
-      || !text(scenario.scenarioId) || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(scenario.scenarioId)
+      // Keep canonical fixture slugs within both the export filename and audit limits.
+      || typeof scenario.scenarioId !== 'string' || scenario.scenarioId.length > 64
+      || !/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(scenario.scenarioId)
       || !isCalendarDay(scenario.referenceDate) || !text(scenario.label) || !text(scenario.notice) || !Array.isArray(scenario.patches)) return invalid('Invalid scenario definition.');
     const targets = new Set();
     for (const patch of scenario.patches) {

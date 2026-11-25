@@ -9,7 +9,7 @@ import App from '../src/App.jsx';
 import { GlobalBar } from '../src/components/GlobalBar.jsx';
 import { PortfolioProvider } from '../src/components/PortfolioProvider.jsx';
 import TowerMapPage from '../src/pages/TowerMapPage.jsx';
-import { loadBaseline } from '../src/utils/fixtures.js';
+import { loadBaseline, validateBundle } from '../src/utils/fixtures.js';
 import { createPortfolioState, reduce } from '../src/utils/portfolioReducer.js';
 import { rankActions, selectQueue } from '../src/utils/actions.js';
 import { listAlerts } from '../src/utils/alerts.js';
@@ -137,6 +137,45 @@ describe('map and list sharing', () => {
     expect(command(state, { kind: 'signal', ref: kpis.critical.ref }).result.code).toBe('STALE_VIEW');
     expect(command(state, { kind: 'facet', key: 'not-a-facet', value: 'Critical' }).result.code).toBe('INVALID_FILTER');
     expect(command(state, { kind: 'reset' }).discovery).toEqual(baseline.discovery);
+  });
+  it.each([
+    [{ kind: 'query', query: 123 }, 'INVALID_QUERY'],
+    [{ kind: 'query' }, 'INVALID_QUERY'],
+    [{ kind: 'facet', key: 'health', value: 'Not a health band' }, 'INVALID_FILTER'],
+    [{ kind: 'selectTower', siteId: 'ZZZ-00000' }, 'SITE_NOT_FOUND'],
+  ])('rejects %j with %s and retains committed discovery and decisions', (intent, code) => {
+    let prior = command(baseline, { kind: 'query', query: '  chi ' });
+    prior = command(prior, { kind: 'facet', key: 'health', value: 'Critical' });
+    prior = command(prior, { kind: 'signal', ref: kpis.critical.ref });
+    prior = command(prior, { kind: 'selectTower', siteId: chi });
+    expect(prior.discovery).toMatchObject({ query: '  chi ', selectedSiteId: chi, signal: kpis.critical.ref, filters: { health: ['Critical'] } });
+
+    const rejected = command(prior, intent);
+    expect(rejected.result).toEqual({ ok: false, code });
+    expect(rejected.discovery).toBe(prior.discovery);
+    expect(rejected.snapshot).toBe(prior.snapshot);
+    expect(rejected.assessments).toBe(prior.assessments);
+    expect(rejected.audit.lastErrorCode).toBe(code);
+    expect(rejected.audit.events).toBe(prior.audit.events);
+  });
+
+  it('rejects a current but unavailable revenue drill-in and retains the prior signal', () => {
+    const raw = structuredClone(loadBaseline().value);
+    Object.assign(raw.sites.find(site => site.siteId === nyc).commercial.revenue,
+      { value: null, missingReason: 'not-provided' });
+    const state = createPortfolioState(validateBundle(raw));
+    const tiles = selectKpis(state.snapshot, state.assessments, listAlerts(state.snapshot));
+    expect(tiles.revenue).toMatchObject({ value: null, siteIds: null });
+    const prior = command(state, { kind: 'signal', ref: tiles.critical.ref });
+    expect(prior.discovery.signal).toEqual(tiles.critical.ref);
+
+    const rejected = command(prior, { kind: 'signal', ref: tiles.revenue.ref });
+    expect(rejected.result).toEqual({ ok: false, code: 'SIGNAL_UNAVAILABLE' });
+    expect(rejected.discovery).toBe(prior.discovery);
+    expect(rejected.snapshot).toBe(prior.snapshot);
+    expect(rejected.assessments).toBe(prior.assessments);
+    expect(rejected.audit.lastErrorCode).toBe('SIGNAL_UNAVAILABLE');
+    expect(rejected.audit.events).toBe(prior.audit.events);
   });
 });
 

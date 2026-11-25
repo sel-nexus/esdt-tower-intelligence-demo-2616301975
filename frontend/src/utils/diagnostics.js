@@ -4,7 +4,8 @@ const eventTypes = new Set([...Object.keys(slots), 'EVIDENCE_MASK_CHANGED', 'SET
   'ACTION_STATUS_CHANGED', 'ACTION_CATEGORY_CHANGED', 'FOLLOW_UP_RECOMMENDED']);
 const values = new Set(['Open', 'Acknowledged', 'Closed', 'In Progress', 'Completed', 'Grow', 'Improve', 'Protect']);
 const safeErrors = new Set(['INVALID_FIXTURE', 'INVALID_SCENARIO', 'INVALID_MASK', 'INVALID_SETTINGS', 'INVALID_CONTROL',
-  'INVALID_TRANSITION', 'INVALID_CATEGORY', 'SITE_NOT_FOUND', 'ITEM_NOT_FOUND', 'STALE_VIEW', 'EXPORT_FAILED']);
+  'INVALID_TRANSITION', 'INVALID_CATEGORY', 'SITE_NOT_FOUND', 'ITEM_NOT_FOUND', 'STALE_VIEW', 'EXPORT_FAILED',
+  'INVALID_QUERY', 'INVALID_FILTER', 'SIGNAL_UNAVAILABLE']);
 const slug = /^[a-z][a-z0-9-]{0,63}$/;
 const siteKey = /^[A-Z0-9][A-Z0-9-]{0,63}$/;
 const itemKey = /^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$/;

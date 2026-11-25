@@ -7,6 +7,7 @@ import { createElement } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 import App from '../src/App.jsx';
 import { PortfolioProvider, usePortfolio } from '../src/components/PortfolioProvider.jsx';
+import { captureExport } from '../src/utils/export.js';
 import { loadBaseline, readAttribute, validateBundle } from '../src/utils/fixtures.js';
 import { createPortfolioState, reduce } from '../src/utils/portfolioReducer.js';
 import { buildSnapshot, createBaselineControls, summarizeBaseline } from '../src/utils/scenario.js';
@@ -89,6 +90,46 @@ describe('synthetic fixture', () => {
     const result = validateBundle(raw);
     expect(result).toMatchObject({ ok: false, code: 'INVALID_FIXTURE' });
     expect(createPortfolioState(result)).toMatchObject({ snapshot: null, base: null });
+  });
+  it.each([
+    ['omitted required attribute key', raw => { delete raw.sites[0].power.headroomKw.missingReason; },
+      'Invalid attribute or evidence reference at NYC-10234 / power.headroomKw.'],
+    ['conflicting replacements for the same site attribute', raw => {
+      const scenario = raw.scenarios.find(item => item.scenarioId === 'energy-pressure');
+      const patch = scenario.patches.find(item => item.siteId === nyc && item.path === path);
+      scenario.patches.push({ ...patch, attribute: { ...patch.attribute, value: 7 } });
+    }, 'Duplicate scenario patch target.'],
+  ])('rejects %s without publishing any portion of the candidate fixture', (_, corrupt, detail) => {
+    const prior = control(createPortfolioState(fixture), { kind: 'switch', scenarioId: 'energy-pressure' });
+    const raw = structuredClone(prior.base);
+    corrupt(raw);
+    const result = validateBundle(raw);
+    expect(result).toEqual({ ok: false, code: 'INVALID_FIXTURE', detail });
+    expect(createPortfolioState(result)).toMatchObject({ snapshot: null, base: null });
+    expect(prior.snapshot).toMatchObject({ scenarioId: 'energy-pressure', snapshotRevision: 2 });
+    expect(readAttribute(prior.snapshot.sitesById.get(nyc), path).value).toBe(2);
+    expect(readAttribute(prior.base.sites.find(site => site.siteId === nyc), path)).toMatchObject({ value: 4, missingReason: null });
+    expect(prior.base.scenarios.find(scenario => scenario.scenarioId === 'energy-pressure').patches
+      .filter(patch => patch.siteId === nyc && patch.path === path).map(patch => patch.attribute.value)).toEqual([2]);
+  });
+
+  it.each(['0-pressure', `a${'1'.repeat(64)}`, 'energy--pressure', 'energy-', 'energy\n'])('rejects incompatible scenario slug %j at fixture ingestion', scenarioId => {
+    const raw = structuredClone(fixture.value);
+    raw.scenarios.find(item => item.scenarioId === 'energy-pressure').scenarioId = scenarioId;
+    expect(validateBundle(raw)).toEqual({ ok: false, code: 'INVALID_FIXTURE', detail: 'Invalid scenario definition.' });
+  });
+
+  it.each(['a', `a-${'1'.repeat(62)}`])('accepts boundary scenario slug %s for fixture, audit, and export', scenarioId => {
+    const raw = structuredClone(fixture.value);
+    raw.scenarios.find(item => item.scenarioId === 'energy-pressure').scenarioId = scenarioId;
+    const accepted = validateBundle(raw);
+    expect(accepted.ok).toBe(true);
+    const state = control(createPortfolioState(accepted), { kind: 'switch', scenarioId, timestamp: '2025-03-01T00:00:00.000Z' });
+    expect(state.snapshot.scenarioId).toBe(scenarioId);
+    expect(state.audit.latest.scenario).toMatchObject({ type: 'SCENARIO_CHANGED', scenarioId, previousScenarioId: 'baseline' });
+    expect(captureExport(state.assessments.get(nyc).ref, state.assessments)).toMatchObject({
+      ok: true, record: { filename: `${nyc}-${scenarioId}-assessment.txt` },
+    });
   });
 });
 

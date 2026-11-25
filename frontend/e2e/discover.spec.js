@@ -30,6 +30,25 @@ test('drills into a KPI and opens the same assessment by marker and row', async 
   await expect(page.getByRole('heading', { level: 1 })).toContainText('CHI-40117');
 });
 
+test('compares ranked shortlists across scenarios and opens the top growth assessment', async ({ page }) => {
+  await page.goto('/');
+  const shortlists = page.getByRole('region', { name: 'Priority shortlists' });
+  const growth = shortlists.getByRole('region', { name: 'Growth Opportunities shortlist' }).getByRole('link');
+  const critical = shortlists.getByRole('region', { name: 'Critical Sites shortlist' }).getByRole('link');
+  await expect(growth).toHaveText(['NYC-10234', 'ATL-30492']);
+  await expect(critical).toHaveText(['CHI-40117']);
+  await growth.first().click();
+  const heading = page.getByRole('heading', { level: 1, name: /NYC-10234/ });
+  await expect(heading).toBeFocused();
+  await expect(page.getByRole('region', { name: 'Tower health' })).toContainText('Good · 86/100');
+
+  await page.getByRole('link', { name: 'Portfolio', exact: true }).click();
+  await page.getByLabel('Active scenario', { exact: true }).selectOption('energy-pressure');
+  await expect(page.getByRole('region', { name: 'Active scenario summary' })).toContainText('Energy pressure · 2025-03-15');
+  await expect(growth).toHaveText(['ATL-30492']);
+  await expect(critical).toHaveText(['CHI-40117']);
+});
+
 test('searches, intersects a filter, switches scenario and resets on a mobile-width viewport', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/');

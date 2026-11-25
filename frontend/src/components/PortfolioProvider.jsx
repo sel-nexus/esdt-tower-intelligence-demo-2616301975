@@ -27,7 +27,7 @@ export function PortfolioProvider({ children, fixtureResult, now = nowUtc, downl
     dispatch({ ...command, commandId: id, timestamp: now() });
     return id;
   }, [now]);
-  /** Initiate an explicit local download only from a currently committed capture. */
+  /** Initiate a local download from the committed capture, reporting adapter failures safely. */
   const downloadExport = useCallback(previewId => {
     const preview = state.preview;
     if (commandId.current !== state.lastCommandId || !preview || preview.id !== previewId) {
@@ -36,7 +36,12 @@ export function PortfolioProvider({ children, fixtureResult, now = nowUtc, downl
     }
     const id = ++commandId.current;
     const timestamp = now();
-    const result = download(preview.text, preview.record.filename);
+    let result;
+    try {
+      result = download(preview.text, preview.record.filename);
+    } catch {
+      result = { ok: false, code: 'EXPORT_FAILED' };
+    }
     if (commandId.current === id) dispatch({ kind: 'downloadExport', previewId, initiated: result.ok, commandId: id, timestamp });
     return result;
   }, [state.preview, state.lastCommandId, now, download]);

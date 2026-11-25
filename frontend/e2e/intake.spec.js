@@ -72,10 +72,34 @@ test('enters from signed out, keeps literal samples across reset and reload, and
   expect(await page.evaluate(key => localStorage.getItem(key), samplesKey)).toBeNull();
   await chooser.setInputFiles({ name: 'practice.TXT', mimeType: 'text/plain', buffer: Buffer.from(text) });
   await expect(page.getByText('No retained samples yet.')).toBeVisible();
+  // Hold delivery of this File's native bytes, not decoding, rendering, or storage.
+  const releaseRead = await chooser.evaluateHandle(input => {
+    const file = input.files[0];
+    const nativeRead = file.arrayBuffer.bind(file);
+    let release;
+    const gate = new Promise(resolve => { release = resolve; });
+    file.arrayBuffer = async () => {
+      const bytes = await nativeRead();
+      await gate;
+      return bytes;
+    };
+    return release;
+  });
+  const intakeStatus = page.getByRole('region', { name: 'Extract a sample' }).getByRole('status');
+  await expect(save).toBeEnabled();
   await save.click();
+  await expect(intakeStatus).toHaveText('Reading synthetic sample…');
+  await expect(save).toBeDisabled();
+  expect(await page.evaluate(key => localStorage.getItem(key), samplesKey)).toBeNull();
+  await releaseRead.evaluate(release => release());
+  await releaseRead.dispose();
+  await expect(intakeStatus).toHaveText('Synthetic sample saved on this browser.');
   const retained = page.getByRole('list', { name: 'Retained samples' });
+  await expect(retained.getByRole('listitem')).toHaveCount(1);
   await expect(retained.getByRole('heading', { name: 'practice.TXT' })).toBeVisible();
   expect(await retained.locator('pre').textContent()).toBe(text);
+  const stored = await page.evaluate(key => JSON.parse(localStorage.getItem(key)), samplesKey);
+  expect(stored).toEqual({ v: 1, records: [expect.objectContaining({ name: 'practice.TXT', text })] });
   await expect(retained.locator('pre strong')).toHaveCount(0);
   expect(await fingerprint(page)).toEqual(before);
   await page.getByRole('link', { name: 'Actions', exact: true }).click();

@@ -39,7 +39,13 @@ export function AssessmentExport({ assessmentRef }) {
           <p role="status" className="mt-2 text-sm text-foreground-muted">
             {downloadResult?.ok ? 'TXT download initiated.' : 'Preview is ready to download.'}
           </p>
-          {downloadResult?.ok === false && <p role="alert" className="mt-2 text-sm text-error">Download did not start. Generate a new preview and try again.</p>}
+          {downloadResult?.ok === false && (
+            <p role="alert" className="mt-2 text-sm text-error">
+              {downloadResult.code === 'STALE_VIEW'
+                ? 'Download did not start. Generate a new preview and try again.'
+                : 'Download did not start. Try Download TXT again.'}
+            </p>
+          )}
         </div>
       )}
     </section>

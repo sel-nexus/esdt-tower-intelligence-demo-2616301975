@@ -9,6 +9,8 @@ import { CREDENTIALS_KEY, DEMO_CREDENTIALS, SESSION_KEY, resumeSession, signIn, 
 import { MAX_SAMPLE_BYTES, SAMPLES_KEY, extractSample, listSamples, removeSample, saveSample } from '../src/utils/samples.js';
 
 const marker = '{"v":1,"signedIn":true}';
+const retainedSample = { id: 'retained-1', name: 'retained.txt', type: 'text/plain', size: 3, lastModified: 0, text: 'abc' };
+const retainedBytes = JSON.stringify({ v: 1, records: [retainedSample] }, null, 2);
 const literal = '\ufeff<b>Synthetic practice only.</b>\r\n\t😀';
 
 afterEach(() => {
@@ -123,10 +125,27 @@ describe('isolated synthetic samples', () => {
     ['invalid UTF-8', txt([0xc3, 0x28]), 'SAMPLE_EXTRACT_FAILED'],
     ['NUL', txt([0]), 'SAMPLE_EXTRACT_FAILED'],
     ['binary control', txt([0x1b]), 'SAMPLE_EXTRACT_FAILED'],
-    ['failed read', txt('a', { arrayBuffer: async () => { throw new Error('Unreadable'); } }), 'SAMPLE_EXTRACT_FAILED'],
   ])('rejects %s before any write', async (_name, file, code) => {
     expect(await extractSample(file)).toEqual({ ok: false, code });
     expect(localStorage.getItem(SAMPLES_KEY)).toBeNull();
+  });
+
+  it('reports a blocked file read without replacing the retained record or its bytes', async () => {
+    localStorage.setItem(SAMPLES_KEY, retainedBytes);
+    const file = txt('new sample', {
+      arrayBuffer: async () => { throw new DOMException('File read blocked', 'NotReadableError'); },
+    });
+    expect(await extractSample(file)).toEqual({ ok: false, code: 'SAMPLE_EXTRACT_FAILED' });
+
+    const { container } = openIntake();
+    stage(file);
+    fireEvent.click(extractButton());
+    expect(await screen.findByRole('alert')).toHaveTextContent('The file could not be read as UTF-8 plain text.');
+    expect(screen.queryByText('Synthetic sample saved on this browser.')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: retainedSample.name })).toBeVisible();
+    expect(container.querySelector('pre').textContent).toBe(retainedSample.text);
+    expect(listSamples()).toEqual({ ok: true, samples: [retainedSample] });
+    expect(localStorage.getItem(SAMPLES_KEY)).toBe(retainedBytes);
   });
 
   it('accepts empty and exactly 64 KiB TXT and preserves Unicode, whitespace and BOM across reads', async () => {
@@ -159,6 +178,50 @@ describe('isolated synthetic samples', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Retry Loading Samples' }));
     expect(screen.getAllByRole('button', { name: /Remove sample/ })).toHaveLength(10);
     expect(localStorage.getItem(SAMPLES_KEY)).toBe(full);
+  });
+
+  it.each([
+    ['duplicate ID', { ...retainedSample, name: 'other.txt' }],
+    ['negative size', { ...retainedSample, id: 'other', size: -1 }],
+    ['oversized record', { ...retainedSample, id: 'other', size: MAX_SAMPLE_BYTES + 1 }],
+    ['UTF-8 byte count mismatch', { ...retainedSample, id: 'other', size: 1, text: 'é' }],
+    ['missing required text', { ...retainedSample, id: 'other', text: undefined }],
+  ])('rejects the entire v1 envelope for %s without rewriting its bytes', (_reason, malformed) => {
+    const raw = JSON.stringify({ v: 1, records: [retainedSample, malformed] }, null, 2);
+    localStorage.setItem(SAMPLES_KEY, raw);
+
+    expect(listSamples()).toEqual({ ok: false, code: 'STORE_VERSION_INVALID' });
+    openIntake();
+    expect(screen.getByRole('alert')).toHaveTextContent('Retained samples are unreadable or from an unsupported version.');
+    expect(screen.queryByRole('list', { name: 'Retained samples' })).not.toBeInTheDocument();
+    expect(screen.queryByText('No retained samples yet.')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry Loading Samples' }));
+    expect(listSamples()).toEqual({ ok: false, code: 'STORE_VERSION_INVALID' });
+    expect(localStorage.getItem(SAMPLES_KEY)).toBe(raw);
+  });
+
+  it('reports blocked sample storage reads and recovers the exact record on retry without writes', () => {
+    localStorage.setItem(SAMPLES_KEY, retainedBytes);
+    const getItem = Storage.prototype.getItem;
+    const blocked = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (key) {
+      if (key === SAMPLES_KEY) throw new DOMException('Read blocked', 'SecurityError');
+      return getItem.call(this, key);
+    });
+
+    expect(listSamples()).toEqual({ ok: false, code: 'STORAGE_UNAVAILABLE' });
+    const { container } = openIntake();
+    expect(screen.getByRole('alert')).toHaveTextContent('Retained samples could not be loaded. Enable browser storage and retry.');
+    expect(screen.queryByText('No retained samples yet.')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Choose Synthetic File')).toBeDisabled();
+    expect(getItem.call(localStorage, SAMPLES_KEY)).toBe(retainedBytes);
+
+    blocked.mockRestore();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry Loading Samples' }));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: retainedSample.name })).toBeVisible();
+    expect(container.querySelector('pre').textContent).toBe(retainedSample.text);
+    expect(listSamples()).toEqual({ ok: true, samples: [retainedSample] });
+    expect(localStorage.getItem(SAMPLES_KEY)).toBe(retainedBytes);
   });
 
   it('keeps the last successful sample and bytes when save or removal runs out of quota', async () => {
