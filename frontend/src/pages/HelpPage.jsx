@@ -4,7 +4,7 @@ export default function HelpPage() {
     <>
       <p className="text-xs font-semibold uppercase tracking-[.16em] text-foreground-muted">Workshop guide</p>
       <h1 tabIndex={-1} className="mt-2 text-4xl font-semibold tracking-tight">Help &amp; about</h1>
-      <p className="mt-3 max-w-prose text-foreground-muted">Use this synthetic portfolio to practice finding a tower, explaining a signal and identifying the next review.</p>
+      <p className="mt-3 max-w-prose text-foreground-muted">Use this synthetic portfolio to practice finding a tower, explaining a signal and identifying the next review. Demo roles change where you start, not what you can access. Switch roles in the header without losing the active scenario, filters or simulated workflow edits in this tab.</p>
       <ol className="mt-8 max-w-3xl divide-y divide-border border-y border-border">
         <li className="grid gap-1 py-5 sm:grid-cols-[12rem_1fr]">
           <h2 className="font-semibold">01 · Find a signal</h2>
@@ -16,10 +16,10 @@ export default function HelpPage() {
         </li>
         <li className="grid gap-1 py-5 sm:grid-cols-[12rem_1fr]">
           <h2 className="font-semibold">03 · Repeat the exercise</h2>
-          <p>Change the active scenario in the header. Use Reset workshop to return to Portfolio with baseline settings and no search, filters or simulated workflow edits. For a rejected fixture, use Reset workshop to reload.</p>
+          <p>Change the active scenario in the header. Use Reset workshop to return to Portfolio with baseline settings and no search, filters or simulated workflow edits. For a rejected fixture, use Reset workshop to reload. If browser storage blocks a role change, enable site storage and retry. To close the workshop, use Exit workshop under your demo role.</p>
         </li>
       </ol>
-      <p className="mt-6 max-w-prose text-sm text-foreground-muted">No live integrations or real work orders. Provisional demo defaults, product signoff pending. Indicative assessment only.</p>
+      <p className="mt-6 max-w-prose text-sm text-foreground-muted">All views use synthetic fixtures and the same configured rules. Health uses weighted component scores and an inspection-expiry penalty. Growth checks confirmed blockers before evidence gaps and fit; a score alone does not establish readiness. No live integrations or real work orders. Provisional demo defaults, product signoff pending. Indicative assessment only.</p>
     </>
   );
 }

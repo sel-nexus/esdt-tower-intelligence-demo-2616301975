@@ -10,9 +10,7 @@ try {
   for (const [name, viewport] of Object.entries({ desktop: { width: 1366, height: 900 }, mobile: { width: 390, height: 844 } })) {
     const page = await browser.newPage({ viewport });
     await page.goto(base);
-    await page.getByLabel('Username').fill('tower-demo');
-    await page.getByLabel('Password').fill('synthetic-only');
-    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+    await page.getByRole('button', { name: 'Portfolio Manager', exact: true }).click();
     const captures = [];
     for (const [state, link] of [['portfolio', null], ['map', 'Tower Map']]) {
       if (link) await page.getByRole('navigation', { name: 'Workshop' }).getByRole('link', { name: link, exact: true }).click();

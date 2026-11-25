@@ -59,10 +59,14 @@ function eventSummary(event) {
   return [event.type, event.scenarioId, event.itemId ?? event.siteId, change, event.mode, event.timestamp].filter(Boolean).join(' · ');
 }
 
-/** Display the selected queue and preserve completed work in its original order. */
-export default function ActionsPage() {
+/**
+ * Display the selected queue and preserve completed work in its original order.
+ * Args:
+ *   initialQueue: Starting queue for this route, before any manual selection.
+ */
+export default function ActionsPage({ initialQueue = QUEUES[0] }) {
   const { state, snapshot, actions, diagnostics, alerts, send } = usePortfolio();
-  const [queue, setQueue] = useState(QUEUES[0]);
+  const [queue, setQueue] = useState(initialQueue);
   const rows = selectQueue(actions, queue);
   const actionIntent = ['setAction', 'categorize', 'recordFollowUp'].includes(state.lastCommandKind);
   return (
@@ -116,3 +120,5 @@ export default function ActionsPage() {
     </div>
   );
 }
+
+ActionsPage.propTypes = { initialQueue: PropTypes.oneOf(QUEUES) };
