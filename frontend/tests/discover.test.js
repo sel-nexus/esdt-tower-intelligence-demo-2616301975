@@ -273,6 +273,56 @@ describe('discovery controls', () => {
     expect(search).toHaveValue('');
   });
 
+  it('shows map multi-select in Portfolio and replaces or clears only the edited facet', async () => {
+    window.localStorage.setItem('esdt.demo.session.v1', '{"v":1,"signedIn":true}');
+    const user = userEvent.setup();
+    render(createElement(App));
+    const map = screen.getByRole('link', { name: 'Tower Map', exact: true });
+    await user.click(map);
+    await user.click(await screen.findByText('Filters · 0 selected'));
+    const states = within(screen.getByRole('group', { name: 'Geography · state' }));
+    await user.click(states.getByRole('checkbox', { name: 'NY', exact: true }));
+    await user.click(states.getByRole('checkbox', { name: 'IL', exact: true }));
+    await user.click(within(screen.getByRole('group', { name: 'Active tenant range' })).getByRole('checkbox', { name: '2–3' }));
+    const rows = within(screen.getByRole('list', { name: 'Matching towers' }));
+    expect(rows.getAllByRole('link').map(row => row.textContent)).toEqual([chi, nyc]);
+
+    await user.click(screen.getByRole('link', { name: 'Portfolio', exact: true }));
+    const state = await screen.findByRole('combobox', { name: 'State' });
+    expect(state).toHaveDisplayValue('Multiple selected');
+    expect(within(state).getByRole('option', { name: 'Multiple selected' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Active towers: 2' })).toBeVisible();
+    const criteria = within(screen.getByRole('list', { name: 'Active discovery criteria' }));
+    expect(criteria.getByText('Geography · state: NY, IL')).toBeVisible();
+
+    const search = screen.getByRole('searchbox', { name: 'Search towers' });
+    await user.type(search, nyc);
+    await user.keyboard('{Escape}');
+    expect(screen.getByRole('button', { name: 'Active towers: 1' })).toBeVisible();
+    await user.selectOptions(state, 'IL');
+    expect(state).toHaveDisplayValue('IL');
+    expect(criteria.getByText('Geography · state: IL')).toBeVisible();
+    expect(criteria.getByText('Active tenant range: 2–3')).toBeVisible();
+    expect(criteria.getByText(`Search: ${nyc}`)).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Active towers: 0' })).toBeVisible();
+
+    await user.selectOptions(state, within(state).getByRole('option', { name: 'Any', exact: true }));
+    expect(state).toHaveDisplayValue('Any');
+    expect(criteria.queryByText(/Geography · state:/)).not.toBeInTheDocument();
+    expect(criteria.getByText('Active tenant range: 2–3')).toBeVisible();
+    expect(criteria.getByText(`Search: ${nyc}`)).toBeVisible();
+    expect(search).toHaveValue(nyc);
+    expect(screen.getByRole('button', { name: 'Active towers: 1' })).toBeVisible();
+
+    await user.click(map);
+    await user.click(await screen.findByText('Filters · 1 selected'));
+    const clearedStates = within(screen.getByRole('group', { name: 'Geography · state' }));
+    expect(clearedStates.getByRole('checkbox', { name: 'NY', exact: true })).not.toBeChecked();
+    expect(clearedStates.getByRole('checkbox', { name: 'IL', exact: true })).not.toBeChecked();
+    expect(within(screen.getByRole('group', { name: 'Active tenant range' })).getByRole('checkbox', { name: '2–3' })).toBeChecked();
+    expect(within(screen.getByRole('list', { name: 'Matching towers' })).getAllByRole('link').map(row => row.textContent)).toEqual([nyc]);
+  });
+
   it('keeps recovery and Help reachable without a valid fixture', () => {
     render(createElement(PortfolioProvider, { fixtureResult: { ok: false, code: 'INVALID_FIXTURE' } },
       createElement(GlobalBar, { active: 'map', route: '#/map', onSignOut: () => {} }), createElement(TowerMapPage)));

@@ -70,6 +70,16 @@ describe('readiness', () => {
     ]));
   });
 
+  it('answers No for a confirmed safety issue even when the unchanged score qualifies for Yes', () => {
+    const clear = assessReadiness(snapshot, dal);
+    const site = { ...dal, condition: { ...dal.condition, criticalSafety: value(dal.condition.criticalSafety, true) } };
+    const blocked = assessReadiness(snapshot, site);
+    expect(clear.answer).toBe('Yes');
+    expect(clear.score).toBeGreaterThanOrEqual(snapshot.config.readinessBands.yes);
+    expect(blocked).toMatchObject({ answer: 'No', decidingRule: 'HARD_BLOCKER', score: clear.score });
+    expect(blocked.constraints).toContain('Unresolved critical safety issue');
+  });
+
   it.each([[3.99, 'HARD_BLOCKER'], [4, 'UPGRADE_FIT'], [5, 'UPGRADE_FIT']])(
     'uses the inclusive provisional boundary at tolerance %s kW', (powerToleranceKw, decidingRule) => {
       const result = assessReadiness({ ...snapshot, config: { ...snapshot.config, powerToleranceKw } }, nyc);
@@ -101,7 +111,64 @@ describe('readiness', () => {
     const result = assessReadiness(partial, atl);
     expect(result).toMatchObject({ decidingRule: 'MATERIAL_GAP', remedies: [], effectiveInputs: { spaceDeficit: 1, afterCapacities: { cabinet: 4 } } });
     expect(result.gaps).toContainEqual(expect.objectContaining({ attribute: 'upgrades.cabinet.futureFit', flags: ['Incomplete'] }));
-    expect(assessReadiness(snapshot, { ...atl, upgrades: value(atl.upgrades, []) })).toMatchObject({ decidingRule: 'HARD_BLOCKER' });
+  });
+
+  it('asks for cabinet feasibility evidence when the current complete record explicitly says unverified', () => {
+    const site = { ...atl, upgrades: value(atl.upgrades, [{ ...atl.upgrades.value[0], feasibility: 'unverified' }]) };
+    const result = assessReadiness(snapshot, site);
+    const unresolved = ['Cabinet shortfall: 1 unit', 'Cabinet upgrade fit is unverified'];
+    expect(result).toMatchObject({ answer: 'Need More Information', currentFit: false, remedies: [],
+      effectiveInputs: { 'space.requiredCabinetUnits': 2, spaceDeficit: 1, afterCapacities: { cabinet: 4 } },
+      evidence: expect.arrayContaining([
+        expect.objectContaining({ attribute: 'upgrades.cabinet.afterCapacity', value: 4, freshness: 'Current', completeness: 'complete', usable: true }),
+        expect.objectContaining({ attribute: 'upgrades.cabinet.futureFit', value: 'unverified', freshness: 'Current', completeness: 'complete', usable: true }),
+      ]),
+      constraints: expect.arrayContaining(unresolved),
+    });
+    expect(result.gaps.filter(row => row.materiality === 'required')).toEqual([]);
+    expect(result.recommendation).toMatch(/document that the proposed cabinet upgrade is feasible and meets the tenant’s cabinet demand/i);
+
+    const stricter = { ...snapshot, config: { ...snapshot.config,
+      readinessBands: { information: 98, upgrade: 99, yes: 100 } } };
+    const belowBand = assessReadiness(stricter, site);
+    expect(belowBand.score).toBeLessThan(stricter.config.readinessBands.information);
+    expect(belowBand).toMatchObject({ answer: 'Need More Information', recommendation: result.recommendation });
+
+    const unsafe = { ...site, condition: { ...site.condition, criticalSafety: value(site.condition.criticalSafety, true) } };
+    const blocked = assessReadiness(snapshot, unsafe);
+    expect(blocked).toMatchObject({ answer: 'No', decidingRule: 'HARD_BLOCKER', currentFit: false, remedies: [],
+      constraints: expect.arrayContaining(['Unresolved critical safety issue', ...unresolved]),
+    });
+    expect(blocked.recommendation).toContain('Unresolved critical safety issue');
+    expect(blocked.recommendation).not.toMatch(/cabinet/i);
+  });
+
+  it.each([
+    ['missing catalog', snapshot, value(atl.upgrades, null), 'upgrades', 'Missing'],
+    ['stale catalog listing no remedy', withEvidence(atl.upgrades.evidenceId, { asOf: '2023-12-01' }), value(atl.upgrades, []), 'upgrades', 'Stale'],
+    ['missing after-capacity evidence', withEvidence(atl.upgrades.value[0].evidenceId, { asOf: null }), atl.upgrades, 'upgrades.cabinet.afterCapacity', 'Missing'],
+    ['stale after-capacity evidence', withEvidence(atl.upgrades.value[0].evidenceId, { asOf: '2023-12-01' }), atl.upgrades, 'upgrades.cabinet.afterCapacity', 'Stale'],
+  ])('treats %s as a material gap and retains a separate blocker', (_, input, upgrades, attribute, freshness) => {
+    const site = { ...atl, upgrades };
+    const gap = expect.objectContaining({ attribute, freshness, materiality: 'required' });
+    expect(assessReadiness(input, site)).toMatchObject({ answer: 'Need More Information', decidingRule: 'MATERIAL_GAP',
+      currentFit: false, remedies: [], gaps: expect.arrayContaining([gap]) });
+
+    const unsafe = { ...site, condition: { ...site.condition, criticalSafety: value(site.condition.criticalSafety, true) } };
+    const blocked = assessReadiness(input, unsafe);
+    expect(blocked).toMatchObject({ answer: 'No', decidingRule: 'HARD_BLOCKER', gaps: expect.arrayContaining([gap]) });
+    expect(blocked.recommendation).toContain('Unresolved critical safety issue');
+    expect(blocked.recommendation).not.toMatch(/cabinet/i);
+  });
+
+  it.each([
+    ['absent', []],
+    ['undersized', [{ ...atl.upgrades.value[0], afterCapacity: 1 }]],
+    ['infeasible', [{ ...atl.upgrades.value[0], feasibility: 'infeasible' }]],
+  ])('blocks a cabinet shortfall when current evidence confirms the remedy is %s', (_, proposals) => {
+    const site = { ...atl, upgrades: value(atl.upgrades, proposals) };
+    expect(assessReadiness(snapshot, site)).toMatchObject({ answer: 'No', decidingRule: 'HARD_BLOCKER',
+      currentFit: false, remedies: [], effectiveInputs: { spaceDeficit: 1 } });
   });
 
   it('checks each remedy and required fiber before confirming combined future fit', () => {

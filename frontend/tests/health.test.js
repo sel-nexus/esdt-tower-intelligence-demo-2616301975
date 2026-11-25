@@ -7,6 +7,7 @@ import { createElement } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 import App from '../src/App.jsx';
 import { PortfolioProvider, usePortfolio } from '../src/components/PortfolioProvider.jsx';
+import AssessmentPage from '../src/pages/AssessmentPage.jsx';
 import { listAlerts, transitionAlert } from '../src/utils/alerts.js';
 import { loadBaseline } from '../src/utils/fixtures.js';
 import { assessHealth, deriveAssessments, healthBand, inspectionTiming, resolveEvidence } from '../src/utils/health.js';
@@ -167,6 +168,23 @@ describe('alert progress', () => {
 });
 
 describe('assessment navigation', () => {
+  it('keeps missing tenant power demand in shared evidence without flagging health', async () => {
+    const siteId = 'DAL-20451';
+    const input = structuredClone(fixture);
+    const site = input.value.sites.find(item => item.siteId === siteId);
+    site.power.requiredKw = { ...site.power.requiredKw, value: null, missingReason: 'not-provided' };
+    const user = userEvent.setup();
+    render(createElement(PortfolioProvider, { fixtureResult: input }, createElement(AssessmentPage, { siteId })));
+
+    const health = within(screen.getByRole('region', { name: 'Tower health' }));
+    expect(health.getByText('Good')).toBeVisible();
+    expect(health.queryByText(/Required health evidence needs review/)).not.toBeInTheDocument();
+    await user.click(screen.getByText('Evidence and sources'));
+    const demand = within(screen.getByText('Required power').closest('li'));
+    expect(demand.getByText('power.requiredKw · power · required')).toBeVisible();
+    expect(demand.getByText('Missing · not provided')).toBeVisible();
+  });
+
   it('opens a linked assessment with heading focus, then acknowledges and closes without changing health', async () => {
     window.localStorage.setItem('esdt.demo.session.v1', '{"v":1,"signedIn":true}');
     const user = userEvent.setup();

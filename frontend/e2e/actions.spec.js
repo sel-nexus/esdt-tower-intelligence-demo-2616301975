@@ -87,7 +87,9 @@ test('completes an upgrade and downloads the captured assessment unchanged after
   await controls.getByRole('button', { name: 'Apply settings' }).click();
   await expect(controls.getByText('Effective tolerance: 3 kW')).toBeVisible();
   await expect(controls.getByRole('status')).toHaveText('Snapshot revision 3 · Settings version 2');
-  await page.goBack();
+  await page.getByRole('link', { name: 'Assessments', exact: true }).click();
+  await page.getByRole('link', { name: /^NYC-10234 · Harbor Relay/ }).click();
+  await page.getByRole('link', { name: 'Growth', exact: true }).click();
   await expect(page).toHaveURL(/#\/assessments\/NYC-10234\/growth$/);
   await expect(readiness.getByRole('status')).toHaveText('No');
   await expect(captureLabel).toBeVisible();
@@ -107,6 +109,7 @@ test('completes an upgrade and downloads the captured assessment unchanged after
   await page.getByText('Diagnostics', { exact: true }).click();
   const events = page.getByRole('list', { name: 'Recent local events' });
   await expect(events.getByText(/FOLLOW_UP_RECOMMENDED/)).toHaveCount(1);
+  // Opening Overview again records the new revision; switching its tab to Growth does not.
   await expect(events.getByText(/ASSESSMENT_EXECUTED · baseline · NYC-10234/)).toHaveCount(2);
   await expect(events.getByText(/SETTINGS_CHANGED · baseline/)).toHaveCount(1);
   const exports = events.getByRole('listitem').filter({ hasText: 'ASSESSMENT_EXPORTED' });
@@ -114,5 +117,31 @@ test('completes an upgrade and downloads the captured assessment unchanged after
   await expect(exports.nth(0)).toContainText('ASSESSMENT_EXPORTED · baseline · NYC-10234 · download');
   await expect(exports.nth(1)).toContainText('ASSESSMENT_EXPORTED · baseline · NYC-10234 · preview');
   expect(requests).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
+test('follows the high operating cost queue to Seattle and shows the energy cost and owner advice', async ({ page }) => {
+  const errors = [];
+  page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+  page.on('pageerror', error => errors.push(error.message));
+
+  await page.addInitScript(() => localStorage.setItem('esdt.demo.session.v1', '{"v":1,"signedIn":true}'));
+  await page.goto('/');
+  await page.getByRole('link', { name: 'Actions', exact: true }).click();
+  await page.getByLabel('Action queue').selectOption('High Operating Cost');
+  const costLink = page.getByRole('link', { name: 'SEA-50983 · Cost review', exact: true });
+  const row = page.getByRole('listitem').filter({ has: costLink });
+  const reason = 'Energy and operating costs exceed the provisional thresholds.';
+  const advice = 'Review metering and operating costs with the owner.';
+  await expect(row.getByText(`Why this is queued: ${reason}`, { exact: true })).toBeVisible();
+  await expect(row.getByText(`Recommended next step: ${advice}`, { exact: true })).toBeVisible();
+  await costLink.click();
+  await expect(page).toHaveURL(/#\/assessments\/SEA-50983\/overview$/);
+  await expect(page.getByRole('heading', { level: 1, name: 'SEA-50983 · Sound Ridge' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Tower health' }).getByText(advice, { exact: true })).toBeVisible();
+  const commercial = page.getByRole('region', { name: 'Commercial snapshot' });
+  const energyCost = commercial.getByText('Annual energy cost (included in operating cost)', { exact: true });
+  await expect(energyCost.locator('..').locator('dd')).toHaveText(['$16,340', '1634000']);
+  await expect(energyCost.locator('..').getByText('$16,340', { exact: true })).toBeVisible();
   expect(errors).toEqual([]);
 });

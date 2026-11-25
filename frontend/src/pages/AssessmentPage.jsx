@@ -149,7 +149,7 @@ export default function AssessmentPage({ siteId, tab = 'overview' }) {
   }
 
   const { health, inspection, findings, evidence, commercial, disclaimer, ref } = assessment;
-  const healthEvidenceNeedsReview = evidence.some(item => item.materiality === 'required' && !item.usable);
+  const healthEvidenceNeedsReview = findings.some(finding => finding.kind === 'missing-info');
   const siteAlerts = alerts.filter(alert => alert.siteId === siteId);
   const nextAction = nextOperationalAction(actions, siteId);
   return (

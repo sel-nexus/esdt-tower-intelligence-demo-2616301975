@@ -102,3 +102,35 @@ test('compares Dallas current fit with Chicago hard blockers and shows the effec
   }
   expect(errors).toEqual([]);
 });
+
+test('proves the Atlanta cabinet upgrade meets modeled demand and shows the supporting evidence', async ({ page }) => {
+  const errors = [];
+  page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+  page.on('pageerror', error => errors.push(error.message));
+
+  await page.addInitScript(() => localStorage.setItem('esdt.demo.session.v1', '{"v":1,"signedIn":true}'));
+  await page.goto('/');
+  await page.getByRole('link', { name: 'Actions', exact: true }).click();
+  await page.getByLabel('Action queue').selectOption('Upgrade Required');
+  await page.getByRole('link', { name: 'ATL-30492 · Cabinet upgrade', exact: true }).click();
+  await page.getByRole('link', { name: 'Growth', exact: true }).click();
+  await expect(page).toHaveURL(/#\/assessments\/ATL-30492\/growth$/);
+
+  const fit = page.getByRole('region', { name: 'Colocation readiness' });
+  await expect(fit.getByRole('status')).toHaveText('Yes after an upgrade');
+  await expect(fit.getByText('Cabinet shortfall: 1 unit', { exact: true })).toBeVisible();
+  await expect(fit).toContainText('Complete the cabinet upgrade before adding a tenant, then validate fit.');
+  await fit.getByText('Deciding rule and score breakdown', { exact: true }).click();
+  await expect(fit.getByText('UPGRADE_FIT', { exact: true })).toBeVisible();
+  for (const [label, value] of [
+    ['Free cabinet units', '1'], ['Required cabinet units', '2'], ['Estimated free cabinet units after upgrade', '4'],
+  ]) {
+    await expect(fit.getByText(label, { exact: true }).locator('..').locator('dd')).toHaveText(value);
+  }
+  await page.getByText('Evidence and sources', { exact: true }).click();
+  const futureFit = page.getByRole('listitem').filter({ hasText: 'Cabinet upgrade future fit' });
+  await expect(futureFit).toBeVisible();
+  await expect(futureFit).toContainText('Synthetic Future Fit Worksheet');
+  await expect(futureFit.getByText('Current', { exact: true })).toBeVisible();
+  expect(errors).toEqual([]);
+});

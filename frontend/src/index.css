@@ -18,6 +18,12 @@
     grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
     gap: 0.875rem;
   }
+  .workshop-entry-title:focus { outline: none; } /* Programmatic reading target, not a control. */
+  @media (min-width: 66rem) {
+    .workshop-role-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+    .workshop-role-grid > li { grid-column: span 2; }
+    .workshop-role-grid > li:nth-last-child(-n + 2) { grid-column: span 3; }
+  }
   .workshop-role {
     display: flex;
     flex-direction: column;

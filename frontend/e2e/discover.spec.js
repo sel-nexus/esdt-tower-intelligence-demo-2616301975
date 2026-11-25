@@ -30,23 +30,47 @@ test('drills into a KPI and opens the same assessment by marker and row', async 
   await expect(page.getByRole('heading', { level: 1 })).toContainText('CHI-40117');
 });
 
-test('compares ranked shortlists across scenarios and opens the top growth assessment', async ({ page }) => {
+test('opens Critical and Growth shortlist assessments and recalculates both distributions', async ({ page }) => {
   await page.goto('/');
+  const portfolio = page.getByRole('link', { name: 'Portfolio', exact: true });
+  const summary = page.getByRole('region', { name: 'Active scenario summary' });
+  const health = summary.getByRole('figure', { name: 'Health distribution' });
+  const readiness = summary.getByRole('figure', { name: 'Readiness distribution' });
+  await expect(health.getByRole('button', { name: 'Health distribution: Good, 12' })).toBeVisible();
+  await expect(readiness.getByRole('button', { name: 'Readiness distribution: Yes after an upgrade, 2' })).toBeVisible();
+  await expect(readiness.getByRole('button', { name: 'Readiness distribution: No, 4' })).toBeVisible();
   const shortlists = page.getByRole('region', { name: 'Priority shortlists' });
   const growth = shortlists.getByRole('region', { name: 'Growth Opportunities shortlist' }).getByRole('link');
-  const critical = shortlists.getByRole('region', { name: 'Critical Sites shortlist' }).getByRole('link');
+  const criticalList = shortlists.getByRole('region', { name: 'Critical Sites shortlist' });
+  const critical = criticalList.getByRole('link');
   await expect(growth).toHaveText(['NYC-10234', 'ATL-30492']);
   await expect(critical).toHaveText(['CHI-40117']);
+  await criticalList.getByRole('link', { name: 'CHI-40117', exact: true }).click();
+  await expect(page.getByRole('heading', { level: 1, name: /CHI-40117/ })).toBeFocused();
+  await expect(page.getByRole('region', { name: 'Tower health' })).toContainText('Critical · 53/100');
+  await portfolio.click();
   await growth.first().click();
   const heading = page.getByRole('heading', { level: 1, name: /NYC-10234/ });
   await expect(heading).toBeFocused();
   await expect(page.getByRole('region', { name: 'Tower health' })).toContainText('Good · 86/100');
 
-  await page.getByRole('link', { name: 'Portfolio', exact: true }).click();
+  await portfolio.click();
   await page.getByLabel('Active scenario', { exact: true }).selectOption('energy-pressure');
-  await expect(page.getByRole('region', { name: 'Active scenario summary' })).toContainText('Energy pressure · 2025-03-15');
+  await expect(summary).toContainText('Energy pressure · 2025-03-15');
   await expect(growth).toHaveText(['ATL-30492']);
   await expect(critical).toHaveText(['CHI-40117']);
+  await expect(health.getByRole('button', { name: 'Health distribution: Good, 12' })).toBeVisible();
+  await expect(readiness.getByRole('button', { name: 'Readiness distribution: Yes after an upgrade, 1' })).toBeVisible();
+  await expect(readiness.getByRole('button', { name: 'Readiness distribution: No, 5' })).toBeVisible();
+
+  await summary.getByRole('combobox', { name: 'State' }).selectOption('NY');
+  await expect(summary.getByRole('button', { name: 'Active towers: 1' })).toBeVisible();
+  for (const [band, count] of [['Good', 1], ['Needs Attention', 0], ['Critical', 0], ['Unknown', 0]]) {
+    await expect(health.getByRole('button', { name: `Health distribution: ${band}, ${count}`, exact: true })).toBeVisible();
+  }
+  for (const [band, count] of [['Yes', 0], ['Yes after an upgrade', 0], ['Need More Information', 0], ['No', 1], ['Unknown', 0]]) {
+    await expect(readiness.getByRole('button', { name: `Readiness distribution: ${band}, ${count}`, exact: true })).toBeVisible();
+  }
 });
 
 test('searches, intersects a filter, switches scenario and resets on a mobile-width viewport', async ({ page }) => {
@@ -101,6 +125,125 @@ test('keeps scoped KPI contributors and mobile marker and list identities aligne
   await expect(page.getByText('1 matching tower · 1 on map')).toBeVisible();
   await page.getByRole('button', { name: 'Clear search and filters' }).click();
   await expect(page.getByText('25 matching towers · 25 on map')).toBeVisible();
+});
+
+/** Verify cohort membership in both user-visible projections, not just their counts. */
+async function expectMapCohort(page, siteIds) {
+  await expect(page.getByText(`${siteIds.length} matching ${siteIds.length === 1 ? 'tower' : 'towers'} · ${siteIds.length} on map`, { exact: true })).toBeVisible();
+  const rows = page.getByRole('list', { name: 'Matching towers' }).getByRole('link');
+  const markers = page.getByRole('group', { name: 'Tower markers' }).getByRole('link');
+  await expect(rows).toHaveText(siteIds);
+  await expect(markers).toHaveCount(siteIds.length);
+  for (const [index, siteId] of siteIds.entries()) {
+    await expect(markers.nth(index)).toHaveAccessibleName(new RegExp(`^${siteId} · `));
+  }
+}
+
+const baselineTowerIds = [
+  'ABQ-71137', 'ATL-30492', 'BNA-70618', 'BOS-70101', 'CHI-40117', 'CLE-71928', 'DAL-20451', 'DEN-70831', 'DTW-71897',
+  'LAX-60214', 'MCI-71683', 'MIA-70520', 'MSP-70716', 'NYC-10234', 'OMA-71533', 'PDX-71244', 'PHL-70204', 'PHX-70972',
+  'PIT-70315', 'RDU-70422', 'SAC-71408', 'SEA-50983', 'SFO-71311', 'SLC-71054', 'STL-71765',
+];
+const goodTowerIds = [
+  'ATL-30492', 'BNA-70618', 'BOS-70101', 'DAL-20451', 'DEN-70831', 'MIA-70520', 'MSP-70716', 'NYC-10234',
+  'PHL-70204', 'PHX-70972', 'PIT-70315', 'RDU-70422',
+];
+
+for (const [metric, value, contributors] of [
+  ['Active towers', '25', baselineTowerIds],
+  ['Active tenants', '62', baselineTowerIds],
+  ['Average tenancy', '2.48', baselineTowerIds],
+  ['Indicative annual revenue', '$1,890,000', baselineTowerIds],
+  ['Healthy sites', '48%', goodTowerIds],
+  ['Open alerts', '4', ['CHI-40117', 'LAX-60214', 'SEA-50983']],
+]) {
+  test(`drills from ${metric} to its exact contributing towers`, async ({ page }) => {
+    await page.goto('/');
+    const summary = page.getByRole('region', { name: 'Active scenario summary' });
+    await summary.getByRole('button', { name: `${metric}: ${value}`, exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Tower Map' })).toBeFocused();
+    await expect(page.getByText(`Signal: ${metric} · ${contributors.length} contributing towers`, { exact: true })).toBeVisible();
+    await expectMapCohort(page, contributors);
+  });
+}
+
+for (const [facet, choice, matches] of [
+  ['Health', 'Good', goodTowerIds],
+  ['Tower type', 'monopole', ['DAL-20451', 'DEN-70831', 'LAX-60214', 'MCI-71683', 'PDX-71244', 'RDU-70422']],
+  ['Geography · state', 'NY', ['NYC-10234']],
+  ['Active tenant range', '0–1', ['SEA-50983']],
+  ['Inspection timing', 'Due', ['BOS-70101', 'CHI-40117', 'DEN-70831', 'LAX-60214', 'OMA-71533']],
+  ['Readiness', 'Yes after an upgrade', ['ATL-30492', 'NYC-10234']],
+  ['Growth opportunity', 'Eligible', ['ATL-30492', 'DAL-20451', 'MIA-70520', 'MSP-70716', 'NYC-10234', 'PHL-70204']],
+  ['Operating or energy cost', 'High cost', ['SEA-50983']],
+]) {
+  test(`filters the map and row cohort by ${facet}: ${choice}`, async ({ page }) => {
+    await page.goto('/');
+    await page.getByRole('link', { name: 'Tower Map', exact: true }).click();
+    await page.getByText('Filters · 0 selected', { exact: true }).click();
+    const option = page.getByRole('group', { name: facet, exact: true }).getByRole('checkbox', { name: choice, exact: true });
+    await option.check();
+    await expect(option).toBeChecked();
+    await expect(page.getByRole('list', { name: 'Active discovery criteria' }).getByRole('listitem')).toHaveText(`${facet}: ${choice}`);
+    await expectMapCohort(page, matches);
+  });
+}
+
+test('scopes Portfolio distributions and Map results by tower type and assessment status, then clears both', async ({ page }) => {
+  await page.goto('/');
+  const summary = page.getByRole('region', { name: 'Active scenario summary' });
+  const quickFilters = summary.getByRole('group', { name: 'Quick filters' });
+  const towerType = quickFilters.getByRole('combobox', { name: 'Tower type', exact: true });
+  const assessmentStatus = quickFilters.getByRole('combobox', { name: 'Assessment status', exact: true });
+  const state = quickFilters.getByRole('combobox', { name: 'State', exact: true });
+  const health = summary.getByRole('figure', { name: 'Health distribution' });
+  const readiness = summary.getByRole('figure', { name: 'Readiness distribution' });
+  const baselineHealth = ['Good, 12', 'Needs Attention, 12', 'Critical, 1', 'Unknown, 0'];
+  const baselineReadiness = ['Yes, 4', 'Yes after an upgrade, 2', 'Need More Information, 15', 'No, 4', 'Unknown, 0'];
+  await expect(towerType).toHaveValue('');
+  await expect(assessmentStatus).toHaveValue('');
+  await expect(state).toHaveValue('');
+  for (const band of baselineHealth) {
+    await expect(health.getByRole('button', { name: `Health distribution: ${band}`, exact: true })).toBeVisible();
+  }
+  for (const band of baselineReadiness) {
+    await expect(readiness.getByRole('button', { name: `Readiness distribution: ${band}`, exact: true })).toBeVisible();
+  }
+
+  await towerType.selectOption('monopole');
+  await expect(summary.getByText('6 active towers in scope.', { exact: true })).toBeVisible();
+  await expect(health.getByRole('button', { name: 'Health distribution: Needs Attention, 3', exact: true })).toBeVisible();
+  await assessmentStatus.selectOption('Good');
+  await expect(summary.getByText('3 active towers in scope.', { exact: true })).toBeVisible();
+  await expect(summary.getByRole('button', { name: 'Active towers: 3', exact: true })).toBeVisible();
+  for (const band of ['Good, 3', 'Needs Attention, 0', 'Critical, 0', 'Unknown, 0']) {
+    await expect(health.getByRole('button', { name: `Health distribution: ${band}`, exact: true })).toBeVisible();
+  }
+  for (const band of ['Yes, 1', 'Yes after an upgrade, 0', 'Need More Information, 2', 'No, 0', 'Unknown, 0']) {
+    await expect(readiness.getByRole('button', { name: `Readiness distribution: ${band}`, exact: true })).toBeVisible();
+  }
+
+  await page.getByRole('link', { name: 'Tower Map', exact: true }).click();
+  const criteria = page.getByRole('list', { name: 'Active discovery criteria' });
+  await expect(criteria).toContainText('Tower type: monopole');
+  await expect(criteria).toContainText('Health: Good');
+  await expectMapCohort(page, ['DAL-20451', 'DEN-70831', 'RDU-70422']);
+  await page.getByRole('link', { name: 'Portfolio', exact: true }).click();
+  await expect(towerType).toHaveValue('monopole');
+  await expect(assessmentStatus).toHaveValue('Good');
+  await summary.getByRole('button', { name: 'Clear search and filters' }).click();
+  await expect(towerType).toHaveValue('');
+  await expect(assessmentStatus).toHaveValue('');
+  await expect(summary.getByText('25 active towers in scope.', { exact: true })).toBeVisible();
+  await expect(summary.getByText('No search or facet filters applied.', { exact: true })).toBeVisible();
+  for (const band of baselineHealth) {
+    await expect(health.getByRole('button', { name: `Health distribution: ${band}`, exact: true })).toBeVisible();
+  }
+  for (const band of baselineReadiness) {
+    await expect(readiness.getByRole('button', { name: `Readiness distribution: ${band}`, exact: true })).toBeVisible();
+  }
+  await page.getByRole('link', { name: 'Tower Map', exact: true }).click();
+  await expectMapCohort(page, baselineTowerIds);
 });
 
 test('recovers from an unregistered hash via its portfolio link', async ({ page }) => {
